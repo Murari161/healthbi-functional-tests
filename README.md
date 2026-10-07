@@ -33,10 +33,15 @@ cp .env.example .env           # then edit .env
 ```
 
 Fill in `.env`:
-- `HEALTHBI_BASE_URL` / `HEALTHBI_API_BASE` — the live site (defaults point at prod).
-- `HEALTHBI_USER` / `HEALTHBI_PASS` — a **dedicated normal (non-admin) QA user**.
-  Using a normal account is what keeps the audit faithful to what real users see.
-  `.env` is gitignored; credentials are only typed into the Keycloak page.
+- `HEALTHBI_BASE_URL` / `HEALTHBI_API_BASE` — the live site (defaults point at prod:
+  `…/report-browser` and `…/report-browser/api`).
+- **Login** — two options (either way, use a **dedicated normal, non-admin QA user**
+  so the audit stays faithful to what real users see):
+  1. **Manual (recommended):** leave `HEALTHBI_USER`/`HEALTHBI_PASS` blank.
+     `prepare-run` opens a browser and **waits for you to sign in by hand** (MFA is
+     fine). No password stored anywhere.
+  2. **Automated:** set both; the Keycloak form is filled for you. `.env` is
+     gitignored and creds are only typed into the Keycloak page.
 
 ## Run
 

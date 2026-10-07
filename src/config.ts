@@ -6,12 +6,6 @@ import 'dotenv/config';
  * specs stay declarative.
  */
 
-function req(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing required env var ${name} (see .env.example)`);
-  return v;
-}
-
 function num(name: string, fallback: number): number {
   const v = process.env[name];
   const n = v ? Number(v) : NaN;
@@ -54,11 +48,6 @@ export const config = {
 
   /** "all" or comma-separated report ids. */
   scope: process.env.REPORT_SCOPE ?? 'all',
-
-  requireCreds(): void {
-    req('HEALTHBI_USER');
-    req('HEALTHBI_PASS');
-  },
 };
 
 /** Build a deep-link URL for a report + a filter combo (param -> value). */

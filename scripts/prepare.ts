@@ -13,14 +13,17 @@ import type { ReportListItem } from '../src/types';
  * doesn't match your Keycloak theme (or there's MFA), you can simply log in by
  * hand in that window; the script waits for you to land back in the app.
  *
- * Credentials come from .env (HEALTHBI_USER / HEALTHBI_PASS) and are only ever
- * typed into the Keycloak page. They are never logged or stored in results.
+ * Two ways to log in:
+ *   - MANUAL (recommended): leave HEALTHBI_USER/PASS unset and just sign in by
+ *     hand in the window that opens (also handles MFA). Nothing is stored.
+ *   - AUTOMATED: set HEALTHBI_USER/PASS in .env and the form is filled for you.
+ * Credentials, when provided, are only ever typed into the Keycloak page and are
+ * never logged or stored in results.
  */
 
-const LOGIN_TIMEOUT = 4 * 60 * 1000; // allow time for manual login / MFA
+const LOGIN_TIMEOUT = 5 * 60 * 1000; // allow time for manual login / MFA
 
 async function main() {
-  config.requireCreds();
   mkdirSync(dirname(config.storageStatePath), { recursive: true });
   mkdirSync(dirname(config.reportsCachePath), { recursive: true });
 
@@ -31,20 +34,24 @@ async function main() {
   console.log(`→ Opening ${config.baseUrl} …`);
   await page.goto(config.baseUrl, { waitUntil: 'domcontentloaded' });
 
-  // Attempt automated Keycloak login. These are the Keycloak default selectors;
-  // if your theme differs, the catch path lets you log in manually instead.
-  // TODO (live-validate): confirm #username / #password / #kc-login on the
-  // actual Health BI Keycloak page.
-  try {
-    const userField = page.locator('#username');
-    await userField.waitFor({ state: 'visible', timeout: 15_000 });
-    console.log('→ Keycloak login form detected — filling credentials…');
-    await userField.fill(config.user);
-    await page.locator('#password').fill(config.pass);
-    await page.locator('#kc-login, button[type="submit"], input[type="submit"]').first().click();
-  } catch {
-    console.log('→ Automated login form not found. If a login page is open, please');
-    console.log('  log in manually in the browser window. Waiting…');
+  // Login. Selectors confirmed on the live Health BI Keycloak page
+  // (realm MoH): #username / #password / #kc-login.
+  const haveCreds = !!(config.user && config.pass);
+  if (haveCreds) {
+    try {
+      const userField = page.locator('#username');
+      await userField.waitFor({ state: 'visible', timeout: 15_000 });
+      console.log('→ Login form detected — filling credentials from .env…');
+      await userField.fill(config.user);
+      await page.locator('#password').fill(config.pass);
+      await page.locator('#kc-login, button[type="submit"], input[type="submit"]').first().click();
+    } catch {
+      console.log('→ Could not auto-fill the form. Please log in manually in the');
+      console.log('  browser window that just opened. Waiting…');
+    }
+  } else {
+    console.log('→ No credentials in .env — please LOG IN MANUALLY in the browser');
+    console.log('  window that just opened (MFA is fine; you have a few minutes). Waiting…');
   }
 
   // Wait until we're back in the app with the report tree present.
