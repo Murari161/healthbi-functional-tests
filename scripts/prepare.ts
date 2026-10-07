@@ -36,8 +36,9 @@ async function main() {
   const page = await context.newPage();
   const getToken = attachTokenCapture(page);
 
-  console.log(`→ Opening ${config.baseUrl} …`);
-  await page.goto(config.baseUrl, { waitUntil: 'domcontentloaded' });
+  const appUrl = `${config.baseUrl}/`; // trailing slash: nginx serves the app at /report-browser/
+  console.log(`→ Opening ${appUrl} …`);
+  await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
 
   // If a saved session is still valid, the app loads and mints a token without a
   // login prompt — reuse it. Otherwise fall through to the login flow.
@@ -47,6 +48,15 @@ async function main() {
     console.log('✓ Reused existing session (no login needed).');
     await page.waitForSelector('#aimara-tree-container', { timeout: LOGIN_TIMEOUT }).catch(() => {});
   } else {
+    // The saved session was missing or expired — clear any stale cookies so the
+    // login flow starts clean (dead Keycloak cookies can cause bad redirects /
+    // nginx 404s), then re-open the app fresh.
+    if (haveSavedSession) {
+      console.log('→ Saved session expired — clearing it and logging in fresh…');
+      await context.clearCookies().catch(() => {});
+      await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
+    }
+
     // Login. Selectors confirmed on the live Health BI Keycloak page
     // (realm MoH): #username / #password / #kc-login.
     const haveCreds = !!(config.user && config.pass);
