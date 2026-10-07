@@ -94,20 +94,30 @@ for (const report of reports) {
   });
 }
 
-/** Wait until the report shell + sections have settled (or empty state shown). */
+/**
+ * Wait until the report has actually finished loading. The app fills
+ * #sections-container with `.skeleton` placeholders during its single
+ * /api/report fetch, then replaces them with real sections (or a "No data"
+ * message). So "done" = no `.skeleton` remains and the container has content.
+ * This is content-type independent and covers the empty/no-data outcomes too.
+ * Timeout is generous because the server runs every component's SQL (up to its
+ * own ~30s budget) before returning.
+ */
 async function waitForReportRender(page: Page): Promise<void> {
-  // Loading overlay should clear.
   await page
-    .locator('#loading-overlay')
-    .waitFor({ state: 'hidden', timeout: 45_000 })
+    .waitForFunction(
+      () => {
+        const sc = document.querySelector('#sections-container');
+        if (!sc) return false;
+        if (sc.querySelector('.skeleton')) return false; // still loading
+        const txt = (sc as HTMLElement).innerText || '';
+        if (/No data available|No data found/i.test(txt)) return true; // empty, but done
+        return sc.children.length > 0; // real content rendered
+      },
+      { timeout: 60_000 },
+    )
     .catch(() => {});
-  // Either sections appear, or the report header shows (even an empty report).
-  await Promise.race([
-    page.locator('#sections-container .section').first().waitFor({ state: 'attached', timeout: 45_000 }),
-    page.locator('#report-header').waitFor({ state: 'visible', timeout: 45_000 }),
-  ]).catch(() => {});
-  // Small settle for async transforms.
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(400); // settle async transforms
 }
 
 /** Scroll through the page so lazy-loaded charts/maps actually render. */
