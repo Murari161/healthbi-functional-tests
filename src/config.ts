@@ -38,10 +38,12 @@ export const config = {
   resultsDir: 'results',
 
   matrix: {
+    // ofat = one-filter-at-a-time + pairwise combos (default); deep = full factorial.
     mode: (process.env.MATRIX_MODE === 'deep' ? 'deep' : 'ofat') as 'ofat' | 'deep',
-    maxYears: num('MAX_YEARS', 2),
-    maxMonths: num('MAX_MONTHS', 2),
-    maxDistricts: num('MAX_DISTRICTS', 2),
+    maxYears: num('MAX_YEARS', 3),
+    maxMonths: num('MAX_MONTHS', 3),
+    maxDistricts: num('MAX_DISTRICTS', 3),
+    maxRegions: num('MAX_REGIONS', 2),
     maxFacilities: num('MAX_FACILITIES', 2),
     maxCustomValues: num('MAX_CUSTOM_VALUES', 2),
   },

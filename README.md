@@ -119,11 +119,13 @@ Filters (built-in **and** custom) are discovered per report from
 `GET /api/report/<id>`; real values come from the same endpoints the UI
 dropdowns use. Tunable in `.env`:
 
-- `MATRIX_MODE=ofat` (default) — **one filter at a time** from a baseline, so a
-  break is attributable to a specific filter value. ~10–14 loads/report.
+- `MATRIX_MODE=ofat` (default) — **one filter at a time** (attributable) **plus
+  pairwise** combos (every pair of filters at their first values, for interaction
+  coverage). ~25–40 combos/report.
 - `MATRIX_MODE=deep` — full factorial of the sampled values. Exhaustive, slow.
-- `MAX_YEARS` / `MAX_MONTHS` / `MAX_DISTRICTS` / `MAX_FACILITIES` /
-  `MAX_CUSTOM_VALUES` — how many values to sample per filter (default 2).
+- `MAX_YEARS` / `MAX_MONTHS` / `MAX_DISTRICTS` (default **3**),
+  `MAX_REGIONS` / `MAX_FACILITIES` / `MAX_CUSTOM_VALUES` (default **2**) —
+  how many values to sample per filter.
 
 Value sampling favors contrast (e.g. a data-rich vs. a sparse district) so the
 ❌-broken vs ⚪-empty distinction is meaningful. Facilities cascade from the
@@ -132,26 +134,26 @@ chosen district, like the UI.
 ## Output
 
 Under `results/` (gitignored):
-- `summary.csv` — the grid: one row per (report, filter combo) with state,
-  component counts, and the **titles of any broken components**.
-- `summary.jsonl` — same data, one JSON object per line.
-- `screenshots/<report>__<combo>.png` — full-page screenshot of each combo.
+- **`report.html`** — the **red/green grid**: per report, rows = components
+  (grouped by section), columns = filter combos, cells 🟩 ok / 🟥 broken / ⬜ empty
+  (hover a red cell for the error). Open this first. Regenerate anytime with
+  `npm run report:html`.
+- **`components.csv`** / `.jsonl` — the per-component drill-down: one row per
+  (report, combo, section, component, type, **state**, error).
+- `summary.csv` / `.jsonl` — the combo-level roll-up: one row per (report, combo)
+  with state, component counts, and the titles of broken components.
+- `screenshots/<report>__<combo>.png` — full **report** screenshot per combo.
+- `screenshots/components/<report>__<combo>__<component>.png` — a screenshot of
+  each **broken component** card.
+
+Component states come from the report JSON the browser fetches (same payload that
+renders the page): a component with `error` set → broken, with data → ok, else empty.
 
 Plus Playwright's own `playwright-report/` (HTML) and `test-results/` (traces).
 
-## ⚠️ Validate against the live site (first run)
+## Validated against the live site ✅
 
-These were inferred from the frontend source and **must be confirmed** on the
-real site during setup (easiest while logged in):
-
-1. **API base path** — `HEALTHBI_API_BASE`. The app may serve APIs at
-   `…/report-browser/api` rather than `…/api`. Confirm `GET …/reports` returns
-   the report list.
-2. **Keycloak login selectors** in `scripts/prepare.ts` (`#username`,
-   `#password`, `#kc-login`). If they differ, just log in manually in the headed
-   window — the script waits for you.
-3. **Component DOM** in `src/classify.ts` — the error-card markup
-   (`.component-error` / `.component-error-title`) and the per-component counting
-   signals, in case the rendered structure differs from what's expected.
-
-Everything is structured so these are one-line fixes once verified.
+Confirmed on prod (2026-10-07): API base is `…/report-browser/api`; Keycloak realm
+`MoH`, selectors `#username`/`#password`/`#kc-login`; component/error DOM and the
+`filterDefinitions` shape match. The reports API requires a Keycloak **Bearer
+token** (not cookies) — the suite captures it from the app's own requests.

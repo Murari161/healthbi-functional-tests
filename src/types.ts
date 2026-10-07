@@ -47,6 +47,19 @@ export interface ReportClassification {
   neverRendered: boolean;
 }
 
+/** One row in the component-level output (per report × combo × component). */
+export interface ComponentResultRow {
+  timestamp: string;
+  reportId: string;
+  comboLabel: string;
+  varies: string;
+  section: string;
+  component: string;
+  type: string;
+  state: ComponentState;
+  error: string;
+}
+
 /** One row in the output summary. */
 export interface ResultRow {
   timestamp: string;

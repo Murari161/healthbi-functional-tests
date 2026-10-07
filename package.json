@@ -7,6 +7,7 @@
   "scripts": {
     "prepare-run": "tsx scripts/prepare.ts",
     "probe": "tsx scripts/probe-api.ts",
+    "report:html": "tsx scripts/make-html.ts",
     "qa": "npm run prepare-run && playwright test",
     "qa:deep": "cross-env MATRIX_MODE=deep npm run qa",
     "test": "playwright test",

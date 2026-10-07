@@ -93,8 +93,9 @@ function sampleCount(paramName: string): number {
     case 'week':
       return config.matrix.maxMonths;
     case 'district':
-    case 'region':
       return config.matrix.maxDistricts;
+    case 'region':
+      return config.matrix.maxRegions;
     case 'facility':
     case 'facility_select':
       return config.matrix.maxFacilities;
@@ -144,7 +145,7 @@ export function buildMatrix(filters: FilterWithValues[]): FilterCombo[] {
       if (Object.keys(params).length === 0) continue;
       combos.push({ label: describe(params), varies: 'combined', params });
     }
-    return combos;
+    return dedupeCombos(combos);
   }
 
   // Default: one-filter-at-a-time. Vary each filter alone; include parent
@@ -159,15 +160,45 @@ export function buildMatrix(filters: FilterWithValues[]): FilterCombo[] {
     }
   }
 
-  // A couple of realistic combined combos (period + location together).
-  const combined: Record<string, string> = {};
+  // Pairwise: first value of each pair of filters, for interaction coverage.
+  // Include parent params so cascaded filters (e.g. facility + district) stay valid.
+  for (let i = 0; i < filters.length; i++) {
+    for (let j = i + 1; j < filters.length; j++) {
+      const a = filters[i];
+      const b = filters[j];
+      if (!a.values.length || !b.values.length) continue;
+      const params: Record<string, string> = {
+        [a.def.paramName]: a.values[0],
+        [b.def.paramName]: b.values[0],
+      };
+      for (const p of [...(a.def.parentParams ?? []), ...(b.def.parentParams ?? [])]) {
+        if (firstVal[p] && !(p in params)) params[p] = firstVal[p];
+      }
+      combos.push({ label: describe(params), varies: 'pair', params });
+    }
+  }
+
+  // One realistic triple (period + location together).
+  const triple: Record<string, string> = {};
   for (const key of ['year', 'month', 'district']) {
-    if (firstVal[key]) combined[key] = firstVal[key];
+    if (firstVal[key]) triple[key] = firstVal[key];
   }
-  if (Object.keys(combined).length >= 2) {
-    combos.push({ label: describe(combined), varies: 'combined', params: combined });
+  if (Object.keys(triple).length >= 3) {
+    combos.push({ label: describe(triple), varies: 'combined', params: triple });
   }
-  return combos;
+
+  return dedupeCombos(combos);
+}
+
+/** Drop combos with identical param sets (e.g. a facility pair that already pulls in its district). */
+function dedupeCombos(combos: FilterCombo[]): FilterCombo[] {
+  const seen = new Set<string>();
+  return combos.filter((c) => {
+    const key = JSON.stringify(Object.keys(c.params).sort().map((k) => [k, c.params[k]]));
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function describe(params: Record<string, string>): string {
