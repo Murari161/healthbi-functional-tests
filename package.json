@@ -1,0 +1,23 @@
+{
+  "name": "healthbi-report-functional-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone post-deploy functional-test suite for Health BI reports. Drives the live web UI as a normal user, applies a per-report filter matrix, and records which components load / are empty / fail. Runs entirely against the deployed site - no backend or DB access.",
+  "scripts": {
+    "prepare-run": "tsx scripts/prepare.ts",
+    "qa": "npm run prepare-run && playwright test",
+    "qa:deep": "cross-env MATRIX_MODE=deep npm run qa",
+    "test": "playwright test",
+    "report": "playwright show-report",
+    "install-browser": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "@types/node": "^22.9.0",
+    "cross-env": "^7.0.3",
+    "dotenv": "^16.4.5",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

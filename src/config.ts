@@ -1,0 +1,63 @@
+import 'dotenv/config';
+
+/**
+ * Central configuration, read from environment (.env). See .env.example.
+ * Everything that varies between environments or runs lives here so the
+ * specs stay declarative.
+ */
+
+function req(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing required env var ${name} (see .env.example)`);
+  return v;
+}
+
+function num(name: string, fallback: number): number {
+  const v = process.env[name];
+  const n = v ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : fallback;
+}
+
+export const config = {
+  /** Live report-browser app, no trailing slash. */
+  baseUrl: (process.env.HEALTHBI_BASE_URL ?? 'https://dashboards.health.go.ug/report-browser').replace(/\/$/, ''),
+  /** API base (origin + /api, usually). */
+  apiBase: (process.env.HEALTHBI_API_BASE ?? 'https://dashboards.health.go.ug/api').replace(/\/$/, ''),
+
+  /** Credentials used only by scripts/prepare.ts for the one-time login. */
+  user: process.env.HEALTHBI_USER ?? '',
+  pass: process.env.HEALTHBI_PASS ?? '',
+
+  /** Saved authenticated browser state, produced by prepare.ts. */
+  storageStatePath: '.auth/user.json',
+  /** Cached report list, produced by prepare.ts. */
+  reportsCachePath: '.cache/reports.json',
+  /** Where screenshots + CSV/JSON summaries land. */
+  resultsDir: 'results',
+
+  matrix: {
+    mode: (process.env.MATRIX_MODE === 'deep' ? 'deep' : 'ofat') as 'ofat' | 'deep',
+    maxYears: num('MAX_YEARS', 2),
+    maxMonths: num('MAX_MONTHS', 2),
+    maxDistricts: num('MAX_DISTRICTS', 2),
+    maxFacilities: num('MAX_FACILITIES', 2),
+    maxCustomValues: num('MAX_CUSTOM_VALUES', 2),
+  },
+
+  /** "all" or comma-separated report ids. */
+  scope: process.env.REPORT_SCOPE ?? 'all',
+
+  requireCreds(): void {
+    req('HEALTHBI_USER');
+    req('HEALTHBI_PASS');
+  },
+};
+
+/** Build a deep-link URL for a report + a filter combo (param -> value). */
+export function reportUrl(reportId: string, combo: Record<string, string>): string {
+  const params = new URLSearchParams({ report: reportId });
+  for (const [k, v] of Object.entries(combo)) {
+    if (v) params.set(k, v);
+  }
+  return `${config.baseUrl}/?${params.toString()}`;
+}
