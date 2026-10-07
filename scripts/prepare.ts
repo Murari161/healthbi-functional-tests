@@ -1,5 +1,5 @@
 import { chromium } from '@playwright/test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { config } from '../src/config';
 import { attachTokenCapture, authHeader, waitForToken } from '../src/auth-capture';
@@ -28,38 +28,50 @@ async function main() {
   mkdirSync(dirname(config.storageStatePath), { recursive: true });
   mkdirSync(dirname(config.reportsCachePath), { recursive: true });
 
+  const haveSavedSession = existsSync(config.storageStatePath);
   const browser = await chromium.launch({ headless: false });
-  const context = await browser.newContext();
+  const context = await browser.newContext(
+    haveSavedSession ? { storageState: config.storageStatePath } : {},
+  );
   const page = await context.newPage();
   const getToken = attachTokenCapture(page);
 
   console.log(`→ Opening ${config.baseUrl} …`);
   await page.goto(config.baseUrl, { waitUntil: 'domcontentloaded' });
 
-  // Login. Selectors confirmed on the live Health BI Keycloak page
-  // (realm MoH): #username / #password / #kc-login.
-  const haveCreds = !!(config.user && config.pass);
-  if (haveCreds) {
-    try {
-      const userField = page.locator('#username');
-      await userField.waitFor({ state: 'visible', timeout: 15_000 });
-      console.log('→ Login form detected — filling credentials from .env…');
-      await userField.fill(config.user);
-      await page.locator('#password').fill(config.pass);
-      await page.locator('#kc-login, button[type="submit"], input[type="submit"]').first().click();
-    } catch {
-      console.log('→ Could not auto-fill the form. Please log in manually in the');
-      console.log('  browser window that just opened. Waiting…');
-    }
-  } else {
-    console.log('→ No credentials in .env — please LOG IN MANUALLY in the browser');
-    console.log('  window that just opened (MFA is fine; you have a few minutes). Waiting…');
-  }
+  // If a saved session is still valid, the app loads and mints a token without a
+  // login prompt — reuse it. Otherwise fall through to the login flow.
+  let token = haveSavedSession ? await waitForToken(page, getToken, 8_000) : null;
 
-  // Wait until we're back in the app with the report tree present.
-  console.log('→ Waiting for the app to load (report tree)…');
-  await page.waitForURL((url) => url.href.startsWith(config.baseUrl), { timeout: LOGIN_TIMEOUT });
-  await page.waitForSelector('#aimara-tree-container', { timeout: LOGIN_TIMEOUT });
+  if (token) {
+    console.log('✓ Reused existing session (no login needed).');
+    await page.waitForSelector('#aimara-tree-container', { timeout: LOGIN_TIMEOUT }).catch(() => {});
+  } else {
+    // Login. Selectors confirmed on the live Health BI Keycloak page
+    // (realm MoH): #username / #password / #kc-login.
+    const haveCreds = !!(config.user && config.pass);
+    if (haveCreds) {
+      try {
+        const userField = page.locator('#username');
+        await userField.waitFor({ state: 'visible', timeout: 15_000 });
+        console.log('→ Login form detected — filling credentials from .env…');
+        await userField.fill(config.user);
+        await page.locator('#password').fill(config.pass);
+        await page.locator('#kc-login, button[type="submit"], input[type="submit"]').first().click();
+      } catch {
+        console.log('→ Could not auto-fill the form. Please log in manually in the');
+        console.log('  browser window that just opened. Waiting…');
+      }
+    } else {
+      console.log('→ No credentials in .env — please LOG IN MANUALLY in the browser');
+      console.log('  window that just opened (MFA is fine; you have a few minutes). Waiting…');
+    }
+
+    // Wait until we're back in the app with the report tree present.
+    console.log('→ Waiting for the app to load (report tree)…');
+    await page.waitForURL((url) => url.href.startsWith(config.baseUrl), { timeout: LOGIN_TIMEOUT });
+    await page.waitForSelector('#aimara-tree-container', { timeout: LOGIN_TIMEOUT });
+  }
 
   await context.storageState({ path: config.storageStatePath });
   console.log(`✓ Saved authenticated session → ${config.storageStatePath}`);
@@ -67,7 +79,7 @@ async function main() {
   // Enumerate reports via the same endpoint the UI uses. The API wants a Keycloak
   // Bearer token (not cookies), so reuse the one the app just sent on its own calls.
   console.log('→ Capturing auth token…');
-  const token = await waitForToken(page, getToken);
+  token = token ?? (await waitForToken(page, getToken));
   if (!token) throw new Error('No Bearer token captured — is the session still valid? Try logging in again.');
 
   console.log('→ Fetching report list…');
