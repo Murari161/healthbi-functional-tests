@@ -11,6 +11,7 @@ import { config } from './src/config';
  */
 export default defineConfig({
   testDir: './tests',
+  globalSetup: './src/global-setup.ts',
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
