@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { config, reportUrl } from '../src/config';
 import { discoverFilters, buildMatrix } from '../src/filters';
+import { attachTokenCapture, waitForToken } from '../src/auth-capture';
 import { classifyReport } from '../src/classify';
 import { appendResult, initSummary, slug } from '../src/summary';
 import type { ReportListItem, ResultRow } from '../src/types';
@@ -38,7 +39,16 @@ test.beforeAll(() => {
 
 for (const report of reports) {
   test(`report: ${report.id}`, async ({ page }) => {
-    const filters = await discoverFilters(page.request, report.id);
+    const getToken = attachTokenCapture(page);
+
+    // Prime: load the report once so the app authenticates (giving us a Bearer
+    // token to reuse) and so we can read its filter definitions.
+    await page.goto(reportUrl(report.id, {}), { waitUntil: 'domcontentloaded' });
+    await waitForReportRender(page);
+    const token = await waitForToken(page, getToken);
+    test.skip(!token, 'No auth token captured — session may have expired; re-run `npm run prepare-run`.');
+
+    const filters = await discoverFilters(page, token, report.id);
     const matrix = buildMatrix(filters);
     const brokenCombos: string[] = [];
 

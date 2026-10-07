@@ -2,6 +2,7 @@ import { chromium } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { config } from '../src/config';
+import { attachTokenCapture, authHeader, waitForToken } from '../src/auth-capture';
 import type { ReportListItem } from '../src/types';
 
 /**
@@ -30,6 +31,7 @@ async function main() {
   const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext();
   const page = await context.newPage();
+  const getToken = attachTokenCapture(page);
 
   console.log(`→ Opening ${config.baseUrl} …`);
   await page.goto(config.baseUrl, { waitUntil: 'domcontentloaded' });
@@ -62,9 +64,14 @@ async function main() {
   await context.storageState({ path: config.storageStatePath });
   console.log(`✓ Saved authenticated session → ${config.storageStatePath}`);
 
-  // Enumerate reports via the same endpoint the UI uses (authenticated).
+  // Enumerate reports via the same endpoint the UI uses. The API wants a Keycloak
+  // Bearer token (not cookies), so reuse the one the app just sent on its own calls.
+  console.log('→ Capturing auth token…');
+  const token = await waitForToken(page, getToken);
+  if (!token) throw new Error('No Bearer token captured — is the session still valid? Try logging in again.');
+
   console.log('→ Fetching report list…');
-  const res = await page.request.get(`${config.apiBase}/reports`);
+  const res = await page.request.get(`${config.apiBase}/reports`, { headers: authHeader(token) });
   if (!res.ok()) throw new Error(`GET /reports failed: HTTP ${res.status()}`);
   const body = await res.json();
   const reports: ReportListItem[] = Array.isArray(body) ? body : (body.reports ?? []);

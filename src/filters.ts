@@ -1,5 +1,6 @@
-import type { APIRequestContext } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { config } from './config';
+import { authHeader } from './auth-capture';
 import type { FilterCombo, FilterDefinition } from './types';
 
 /**
@@ -29,10 +30,13 @@ function filterEndpointUrl(apiEndpoint: string): URL {
 
 /** GET /api/report/<id> -> { filters: string[], filterDefinitions: {name: def} }. */
 async function fetchReportMeta(
-  request: APIRequestContext,
+  page: Page,
+  token: string | null,
   reportId: string,
 ): Promise<{ order: string[]; defs: Record<string, FilterDefinition> }> {
-  const res = await request.get(`${config.apiBase}/report/${encodeURIComponent(reportId)}`);
+  const res = await page.request.get(`${config.apiBase}/report/${encodeURIComponent(reportId)}`, {
+    headers: authHeader(token),
+  });
   if (!res.ok()) throw new Error(`report meta ${reportId}: HTTP ${res.status()}`);
   const body = await res.json();
   return {
@@ -61,7 +65,8 @@ function extractValues(body: unknown): string[] {
 
 /** Fetch valid values for one filter, injecting any parent params (cascades). */
 async function fetchFilterValues(
-  request: APIRequestContext,
+  page: Page,
+  token: string | null,
   def: FilterDefinition,
   parentValues: Record<string, string>,
 ): Promise<string[]> {
@@ -70,7 +75,7 @@ async function fetchFilterValues(
     if (parentValues[p]) url.searchParams.set(p, parentValues[p]);
   }
   try {
-    const res = await request.get(url.toString());
+    const res = await page.request.get(url.toString(), { headers: authHeader(token) });
     if (!res.ok()) return [];
     return extractValues(await res.json()).filter((v) => v && v !== 'null');
   } catch {
@@ -100,17 +105,18 @@ function sampleCount(paramName: string): number {
 
 /** Resolve the report's filters and a sampled set of real values for each. */
 export async function discoverFilters(
-  request: APIRequestContext,
+  page: Page,
+  token: string | null,
   reportId: string,
 ): Promise<FilterWithValues[]> {
-  const { order, defs } = await fetchReportMeta(request, reportId);
+  const { order, defs } = await fetchReportMeta(page, token, reportId);
   const resolved: FilterWithValues[] = [];
   const firstValueByParam: Record<string, string> = {};
 
   for (const name of order) {
     const def = defs[name];
     if (!def) continue;
-    const values = await fetchFilterValues(request, def, firstValueByParam);
+    const values = await fetchFilterValues(page, token, def, firstValueByParam);
     const sampled = values.slice(0, sampleCount(def.paramName));
     if (sampled.length > 0) firstValueByParam[def.paramName] = sampled[0];
     resolved.push({ def, values: sampled });
