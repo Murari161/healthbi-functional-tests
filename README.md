@@ -43,25 +43,64 @@ Fill in `.env`:
   2. **Automated:** set both; the Keycloak form is filled for you. `.env` is
      gitignored and creds are only typed into the Keycloak page.
 
-## Run
+## Run — exact steps
 
+All commands are run from this folder:
+`D:/Data Warehouse Work/dwh_visualization/functional-tests`
+
+**Step 1 — one-time setup** (only the first time):
 ```bash
-npm run qa                     # logs in, caches reports, audits ALL reports (OFAT matrix)
-npm run qa:deep                # full-factorial matrix (exhaustive, slow)
-npm run report                 # open the Playwright HTML report
+npm install
+```
+```bash
+npm run install-browser
+```
+```bash
+cp .env.example .env
+```
+Leave `HEALTHBI_USER` / `HEALTHBI_PASS` blank in `.env` for manual login (recommended).
+
+**Step 2 — log in + cache the report list** (run once, and again whenever the session expires):
+```bash
+npm run prepare-run
+```
+A browser opens — sign in by hand. On success it prints `✓ Cached N reports`. If the
+saved session is still valid it is reused and the window just flashes by (no login needed).
+
+**Step 3 — run the audit.** One report first (good smoke test):
+```bash
+REPORT_SCOPE=community/wash-report npm test
+```
+A few reports:
+```bash
+REPORT_SCOPE="community/wash-report,Programs/Malaria/malaria-monthly-stock-status" npm test
+```
+ALL reports:
+```bash
+npm test
 ```
 
-Scope to a subset without touching code (via `.env` → `REPORT_SCOPE`, or inline):
-
+**Step 4 — view results:**
 ```bash
-# one report
-REPORT_SCOPE=community/wash-report npm run qa
-# a few
-REPORT_SCOPE="community/wash-report,Programs/Malaria/malaria-monthly-stock-status" npm run qa
+npm run report
+```
+Plus `results/summary.csv` (the component×filter grid) and `results/screenshots/`.
+
+### Other commands
+```bash
+npm run probe        # quick auth check — confirms the saved session still works
+npm run qa           # = prepare-run + audit ALL, in one go (re-opens login each run)
+npm run qa:deep      # same as qa, but the full-factorial matrix
+```
+Env tweaks (prefix any `npm test`):
+```bash
+RENDER_TIMEOUT_MS=90000 npm test   # give heavy reports more time to load (default 60s)
+MATRIX_MODE=deep npm test          # exhaustive filter combinations (default: one-at-a-time)
 ```
 
-`npm run qa` = `prepare-run` (headed login + cache report list) then the audit.
-Once a session is cached you can re-run just the audit with `npm test`.
+**Flow tip:** with manual login, prefer `npm run prepare-run` **once**, then `npm test`
+as often as you like — it reuses the saved session. Use `npm run qa` only if you want it
+to log in every time.
 
 ## What it checks (per report × filter combo)
 
