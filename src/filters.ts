@@ -17,7 +17,15 @@ interface FilterWithValues {
   values: string[];
 }
 
-const ORIGIN = new URL(config.apiBase).origin;
+/**
+ * Filter endpoints come back from the server as basePath-less absolute paths
+ * (e.g. "/api/filters/districts?table=..."), so resolve them against the app
+ * base (origin + BASE_PATH), NOT the bare origin — otherwise the /report-browser
+ * subpath is dropped and every request 404s.
+ */
+function filterEndpointUrl(apiEndpoint: string): URL {
+  return new URL(config.baseUrl + apiEndpoint);
+}
 
 /** GET /api/report/<id> -> { filters: string[], filterDefinitions: {name: def} }. */
 async function fetchReportMeta(
@@ -57,7 +65,7 @@ async function fetchFilterValues(
   def: FilterDefinition,
   parentValues: Record<string, string>,
 ): Promise<string[]> {
-  const url = new URL(def.apiEndpoint, ORIGIN);
+  const url = filterEndpointUrl(def.apiEndpoint);
   for (const p of def.parentParams ?? []) {
     if (parentValues[p]) url.searchParams.set(p, parentValues[p]);
   }

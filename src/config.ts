@@ -18,11 +18,19 @@ function num(name: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/**
+ * App base = origin + BASE_PATH (prod: https://dashboards.health.go.ug/report-browser).
+ * The frontend builds API_BASE = BASE_PATH + '/api' (see public/js/app.js), so the
+ * API base is the app base + '/api', NOT the bare origin + '/api'.
+ */
+const baseUrl = (process.env.HEALTHBI_BASE_URL ?? 'https://dashboards.health.go.ug/report-browser').replace(/\/$/, '');
+const apiBase = (process.env.HEALTHBI_API_BASE ?? `${baseUrl}/api`).replace(/\/$/, '');
+
 export const config = {
-  /** Live report-browser app, no trailing slash. */
-  baseUrl: (process.env.HEALTHBI_BASE_URL ?? 'https://dashboards.health.go.ug/report-browser').replace(/\/$/, ''),
-  /** API base (origin + /api, usually). */
-  apiBase: (process.env.HEALTHBI_API_BASE ?? 'https://dashboards.health.go.ug/api').replace(/\/$/, ''),
+  /** Live report-browser app (origin + BASE_PATH), no trailing slash. */
+  baseUrl,
+  /** API base = baseUrl + '/api'. */
+  apiBase,
 
   /** Credentials used only by scripts/prepare.ts for the one-time login. */
   user: process.env.HEALTHBI_USER ?? '',
