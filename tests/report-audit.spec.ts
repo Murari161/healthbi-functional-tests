@@ -114,7 +114,7 @@ async function waitForReportRender(page: Page): Promise<void> {
         if (/No data available|No data found/i.test(txt)) return true; // empty, but done
         return sc.children.length > 0; // real content rendered
       },
-      { timeout: 60_000 },
+      { timeout: config.renderTimeoutMs },
     )
     .catch(() => {});
   await page.waitForTimeout(400); // settle async transforms

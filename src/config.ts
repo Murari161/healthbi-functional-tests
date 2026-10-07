@@ -48,6 +48,15 @@ export const config = {
 
   /** "all" or comma-separated report ids. */
   scope: process.env.REPORT_SCOPE ?? 'all',
+
+  /**
+   * Max time to wait for a report to finish rendering before classifying. Must
+   * exceed the app's own limits: the 30s per-component SQL timeout (shared
+   * across the report) and the 45s frontend hard-abort. Default 60s; override
+   * via RENDER_TIMEOUT_MS. A report that blows these renders error cards / a
+   * timeout box, which the classifier flags as broken.
+   */
+  renderTimeoutMs: num('RENDER_TIMEOUT_MS', 60_000),
 };
 
 /** Build a deep-link URL for a report + a filter combo (param -> value). */

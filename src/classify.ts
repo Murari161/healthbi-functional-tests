@@ -33,6 +33,20 @@ export async function classifyReport(page: Page): Promise<ReportClassification> 
       return (t?.textContent || 'Untitled component').trim();
     });
 
+    // Report-level failure: the whole fetch errored or hit the 45s frontend hard
+    // timeout, replacing all content with a retry/offline box (not per-component
+    // cards). Flag it as broken, not empty.
+    const reportErrEl = root
+      ? root.querySelector('.report-error-state') || root.querySelector('.report-offline-state')
+      : null;
+    if (reportErrEl) {
+      const msg = ((reportErrEl as HTMLElement).innerText || 'report-level error')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 200);
+      brokenComponents.unshift(`REPORT: ${msg}`);
+    }
+
     // Leaked, unsubstituted placeholders indicate a filter/alias bug.
     const text = root ? (root as HTMLElement).innerText || '' : '';
     const leakedPlaceholders = /\{\{[^}]+\}\}/.test(text);
