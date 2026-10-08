@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { config } from './config';
 import { attachTokenCapture, waitForToken } from './auth-capture';
+import { initSummary } from './summary';
 
 /**
  * A readable label for the run folder, derived from REPORT_SCOPE: the report's
@@ -53,6 +54,7 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
     mkdirSync(config.resultsDir, { recursive: true });
     writeFileSync(join(config.resultsDir, '.run-id'), runId, 'utf8');
     mkdirSync(join(config.resultsDir, runId), { recursive: true });
+    initSummary(); // create the output files ONCE here, not in a per-worker beforeAll
     console.log(`✓ Session valid. Output → ${join(config.resultsDir, runId)}`);
   } finally {
     await browser.close();

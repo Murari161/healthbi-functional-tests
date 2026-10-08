@@ -1,5 +1,5 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { runDir } from './config';
 import type { ComponentResultRow, ResultRow } from './types';
 
@@ -53,7 +53,11 @@ const COMP_HEADER = [
   'error',
 ].join(',');
 
-/** Call once at the start of a run to (re)create the output files. */
+/**
+ * (Re)create the output files with headers. Call ONCE per run, from globalSetup —
+ * NOT from a per-worker beforeAll, which Playwright re-runs on every worker
+ * restart (e.g. after a heavy report times out), wiping earlier reports' rows.
+ */
 export function initSummary(): void {
   const { dir, CSV, JSONL, COMP_CSV, COMP_JSONL } = outPaths();
   mkdirSync(dir, { recursive: true });
@@ -63,10 +67,19 @@ export function initSummary(): void {
   writeFileSync(COMP_JSONL, '', 'utf8');
 }
 
-/** Append one result row. Safe to call even if initSummary wasn't (self-heals). */
+/** Create a single file with its header only if missing — never wipes, never touches others. */
+function ensureFile(path: string, header: string): void {
+  if (!existsSync(path)) {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, header, 'utf8');
+  }
+}
+
+/** Append one result row (append-only; safe across worker restarts). */
 export function appendResult(row: ResultRow): void {
   const { CSV, JSONL } = outPaths();
-  if (!existsSync(CSV)) initSummary();
+  ensureFile(CSV, HEADER + '\n');
+  ensureFile(JSONL, '');
   const line = [
     row.timestamp,
     row.reportId,
@@ -87,10 +100,11 @@ export function appendResult(row: ResultRow): void {
   appendFileSync(JSONL, JSON.stringify(row) + '\n', 'utf8');
 }
 
-/** Append one component-level result row. */
+/** Append one component-level result row (append-only; safe across worker restarts). */
 export function appendComponentResult(row: ComponentResultRow): void {
   const { COMP_CSV, COMP_JSONL } = outPaths();
-  if (!existsSync(COMP_CSV)) initSummary();
+  ensureFile(COMP_CSV, COMP_HEADER + '\n');
+  ensureFile(COMP_JSONL, '');
   const line = [
     row.timestamp,
     row.reportId,

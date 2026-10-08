@@ -6,7 +6,7 @@ import { discoverFilters, buildMatrix } from '../src/filters';
 import { attachTokenCapture, waitForToken } from '../src/auth-capture';
 import { classifyReport } from '../src/classify';
 import { componentStatesFromReport, fetchReportJson } from '../src/components';
-import { appendResult, appendComponentResult, initSummary, slug } from '../src/summary';
+import { appendResult, appendComponentResult, slug } from '../src/summary';
 import type { ComponentResultRow, ReportListItem, ResultRow } from '../src/types';
 
 /**
@@ -32,10 +32,6 @@ function loadReports(): ReportListItem[] {
 }
 
 const reports = loadReports();
-
-test.beforeAll(() => {
-  initSummary();
-});
 
 for (const report of reports) {
   test(`report: ${report.id}`, async ({ page }) => {
