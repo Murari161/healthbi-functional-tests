@@ -146,4 +146,21 @@ export default async function generateHtmlReport(): Promise<void> {
   const out = join(dir, 'report.html');
   writeFileSync(out, html, 'utf8');
   console.log(`✓ Component grid → ${out}`);
+
+  // Conclusive, colored summary (Playwright still prints its own passed/failed).
+  const cells: Record<string, number> = { ok: 0, broken: 0, empty: 0 };
+  for (const c of comps) cells[c.state] = (cells[c.state] ?? 0) + 1;
+  const brokenCombos = summary.filter((s) => s.state === 'broken').length;
+  const tty = !!process.stdout.isTTY;
+  const col = (code: string, s: string) => (tty ? `\x1b[${code}m${s}\x1b[0m` : s);
+  console.log('');
+  console.log(
+    `${col('1', 'Audit summary')} — ${byReport.size} report(s) · ${summary.length} combos · ${comps.length} component checks`,
+  );
+  console.log(
+    `  ${col('32', '●')} ${cells.ok} ok   ${col('31', '●')} ${cells.broken} broken   ${col('90', '●')} ${cells.empty} empty`,
+  );
+  console.log(
+    `  ${brokenCombos > 0 ? col('31', '✗') : col('32', '✓')} ${brokenCombos} of ${summary.length} combo(s) broken`,
+  );
 }
