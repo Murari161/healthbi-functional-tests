@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { runDir } from './config';
-import type { ComponentResultRow, ResultRow } from './types';
+import type { ComponentResultRow, DownloadResultRow, ResultRow } from './types';
 
 /**
  * Incremental results writer. Each report appends its rows as it finishes, so a
@@ -18,8 +18,12 @@ function outPaths() {
     JSONL: join(dir, 'summary.jsonl'),
     COMP_CSV: join(dir, 'components.csv'),
     COMP_JSONL: join(dir, 'components.jsonl'),
+    DL_CSV: join(dir, 'downloads.csv'),
+    DL_JSONL: join(dir, 'downloads.jsonl'),
   };
 }
+
+const DL_HEADER = ['timestamp', 'reportId', 'kind', 'label', 'ok', 'filename', 'bytes', 'error'].join(',');
 
 const HEADER = [
   'timestamp',
@@ -61,12 +65,14 @@ const COMP_HEADER = [
  * restart (e.g. after a heavy report times out), wiping earlier reports' rows.
  */
 export function initSummary(): void {
-  const { dir, CSV, JSONL, COMP_CSV, COMP_JSONL } = outPaths();
+  const { dir, CSV, JSONL, COMP_CSV, COMP_JSONL, DL_CSV, DL_JSONL } = outPaths();
   mkdirSync(dir, { recursive: true });
   writeFileSync(CSV, HEADER + '\n', 'utf8');
   writeFileSync(JSONL, '', 'utf8');
   writeFileSync(COMP_CSV, COMP_HEADER + '\n', 'utf8');
   writeFileSync(COMP_JSONL, '', 'utf8');
+  writeFileSync(DL_CSV, DL_HEADER + '\n', 'utf8');
+  writeFileSync(DL_JSONL, '', 'utf8');
 }
 
 /** Create a single file with its header only if missing — never wipes, never touches others. */
@@ -124,6 +130,18 @@ export function appendComponentResult(row: ComponentResultRow): void {
     .join(',');
   appendFileSync(COMP_CSV, line + '\n', 'utf8');
   appendFileSync(COMP_JSONL, JSON.stringify(row) + '\n', 'utf8');
+}
+
+/** Append one download-check row (append-only; safe across worker restarts). */
+export function appendDownloadResult(row: DownloadResultRow): void {
+  const { DL_CSV, DL_JSONL } = outPaths();
+  ensureFile(DL_CSV, DL_HEADER + '\n');
+  ensureFile(DL_JSONL, '');
+  const line = [row.timestamp, row.reportId, row.kind, row.label, row.ok, row.filename, row.bytes, row.error]
+    .map(csvCell)
+    .join(',');
+  appendFileSync(DL_CSV, line + '\n', 'utf8');
+  appendFileSync(DL_JSONL, JSON.stringify(row) + '\n', 'utf8');
 }
 
 /** Safe filename fragment from a report id + combo label. */

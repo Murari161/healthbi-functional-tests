@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { runDir } from './config';
-import type { ComponentResultRow } from './types';
+import type { ComponentResultRow, DownloadResultRow } from './types';
 
 /**
  * Generates results/report.html — a red/green grid per report: rows are
@@ -61,6 +61,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   const dir = runDir();
   const comps: ComponentResultRow[] = readJsonl(join(dir, 'components.jsonl'));
   const summary = readJsonl(join(dir, 'summary.jsonl'));
+  const dls: DownloadResultRow[] = readJsonl(join(dir, 'downloads.jsonl'));
   if (comps.length === 0) return;
 
   const byReport = new Map<string, ComponentResultRow[]>();
@@ -193,6 +194,19 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       brokenHtml += `<h3 class="bk-title">⚠ Broken combos — report-level (${comboLevel.length})</h3><ul class="broken-list">${items}</ul>`;
     }
 
+    // Download checks (run once per report on the baseline combo).
+    const rdl = dls.filter((d) => d.reportId === reportId);
+    const rdlFailed = rdl.filter((d) => !d.ok);
+    if (rdlFailed.length > 0) {
+      const items = rdlFailed
+        .map(
+          (d2) =>
+            `<li><div class="bk-head"><b>${esc(d2.label)}</b> <span class="bk-sec">(${esc(d2.kind)})</span></div><div class="err">${esc(d2.error || 'download failed')}</div></li>`,
+        )
+        .join('');
+      brokenHtml += `<h3 class="bk-title">⬇ Failed downloads (${rdlFailed.length})</h3><ul class="broken-list">${items}</ul>`;
+    }
+
     reportSections.push(`
       <section class="report">
         <h2>${esc(reportId)}</h2>
@@ -202,6 +216,10 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
             leakedList.length > 0 ? ` · <span class="chip leak">⬤ ${leakedList.length} leakage</span>` : ''
           }${
             comboLevel.length > 0 ? ` · <span class="chip warn">⚠ ${comboLevel.length} report-level</span>` : ''
+          }${
+            rdl.length > 0
+              ? ` · <span class="${rdlFailed.length ? 'bad' : 'good'}">⬇ ${rdl.length - rdlFailed.length}/${rdl.length} downloads ok</span>`
+              : ''
           }</p>
         <div class="tablewrap"><table>${thead}${tbody}</table></div>
         ${brokenHtml}
@@ -288,6 +306,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     <span class="chip muted">● ${totals.empty} empty</span>
     ${leakageCombos > 0 ? `<span class="chip leak">⬤ ${leakageCombos} leakage</span>` : ''}
     ${reportLevelBrokenCombos > 0 ? `<span class="chip warn">⚠ ${reportLevelBrokenCombos} report-level</span>` : ''}
+    ${dls.length > 0 ? `<span class="chip ${dls.some((d) => !d.ok) ? 'bad' : 'good'}">⬇ ${dls.filter((d) => d.ok).length}/${dls.length} downloads ok</span>` : ''}
     · <span class="${totalBrokenCombos ? 'bad' : 'good'}">${totalBrokenCombos} of ${summary.length} combos broken</span></p>
   ${reportSections.join('\n')}
 </body></html>`;
@@ -315,4 +334,10 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       reportLevelBrokenCombos > 0 ? col('33', ` (${reportLevelBrokenCombos} report-level)`) : ''
     }`,
   );
+  if (dls.length > 0) {
+    const dlOk = dls.filter((d) => d.ok).length;
+    console.log(
+      `  ${dlOk === dls.length ? col('32', '⬇') : col('31', '⬇')} ${dlOk}/${dls.length} download(s) ok`,
+    );
+  }
 }

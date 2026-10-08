@@ -66,6 +66,18 @@ export interface ComponentResultRow {
   error: string;
 }
 
+/** One row in the downloads output (per report × download control, baseline combo). */
+export interface DownloadResultRow {
+  timestamp: string;
+  reportId: string;
+  kind: 'csv' | 'png';
+  label: string;
+  ok: boolean;
+  filename: string;
+  bytes: number;
+  error: string;
+}
+
 /** One row in the output summary. */
 export interface ResultRow {
   timestamp: string;

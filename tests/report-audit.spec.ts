@@ -6,8 +6,9 @@ import { discoverFilters, buildMatrix } from '../src/filters';
 import { attachTokenCapture, waitForToken } from '../src/auth-capture';
 import { classifyReport } from '../src/classify';
 import { componentStatesFromReport, fetchReportJson } from '../src/components';
-import { appendResult, appendComponentResult, slug } from '../src/summary';
-import type { ComponentResultRow, ReportListItem, ResultRow } from '../src/types';
+import { checkDownloads } from '../src/downloads';
+import { appendResult, appendComponentResult, appendDownloadResult, slug } from '../src/summary';
+import type { ComponentResultRow, DownloadResultRow, ReportListItem, ResultRow } from '../src/types';
 
 /**
  * Post-deploy functional audit. For every report the normal user can see, apply
@@ -78,7 +79,8 @@ for (const report of reports) {
     // report isn't aborted mid-run (each combo may wait up to renderTimeoutMs plus
     // overhead). The test still finishes as soon as the combos do — this is only a
     // ceiling, not a fixed wait.
-    test.setTimeout((matrix.length + 2) * (config.renderTimeoutMs + 15_000));
+    // Extra flat buffer covers the one-off download checks on the baseline combo.
+    test.setTimeout((matrix.length + 2) * (config.renderTimeoutMs + 15_000) + 5 * 60_000);
     const brokenCombos: string[] = [];
 
     for (const combo of matrix) {
@@ -178,6 +180,29 @@ for (const report of reports) {
           error: comp.error,
         };
         appendComponentResult(crow);
+      }
+
+      // Exercise every component's download control once per report (baseline
+      // combo only — the wiring doesn't vary by filter). A control that doesn't
+      // produce a non-empty file is a defect and fails the report.
+      if (combo.varies === 'baseline') {
+        const checks = await checkDownloads(page);
+        const failedDls: string[] = [];
+        for (const chk of checks) {
+          const drow: DownloadResultRow = {
+            timestamp: new Date().toISOString(),
+            reportId: report.id,
+            kind: chk.kind,
+            label: chk.label,
+            ok: chk.ok,
+            filename: chk.filename,
+            bytes: chk.bytes,
+            error: chk.error,
+          };
+          appendDownloadResult(drow);
+          if (!chk.ok) failedDls.push(`${chk.label} — ${chk.error}`);
+        }
+        if (failedDls.length > 0) brokenCombos.push(`[downloads] ${failedDls.join('; ')}`);
       }
 
       if (state === 'broken') {
