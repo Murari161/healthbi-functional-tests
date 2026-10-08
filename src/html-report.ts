@@ -49,7 +49,15 @@ function keyOf(r: ComponentResultRow): string {
     : `${r.section}${SEP}${r.component}`;
 }
 
-export default async function generateHtmlReport(): Promise<void> {
+export default async function generateHtmlReport(playwrightConfig?: unknown): Promise<void> {
+  // When invoked as Playwright's globalTeardown (Playwright passes its config as
+  // an argument), only render if the run actually started — globalSetup sets
+  // AUDIT_RUN_ID on success. Otherwise a failed setup (e.g. expired session)
+  // would re-render the PREVIOUS run and print its summary, which reads as if
+  // the new run produced results. Standalone `npm run report:html` passes no
+  // argument and always renders the most recent run via the marker.
+  if (playwrightConfig !== undefined && !process.env.AUDIT_RUN_ID) return;
+
   const dir = runDir();
   const comps: ComponentResultRow[] = readJsonl(join(dir, 'components.jsonl'));
   const summary = readJsonl(join(dir, 'summary.jsonl'));
