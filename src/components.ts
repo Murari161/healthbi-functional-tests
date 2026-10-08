@@ -32,20 +32,42 @@ function hasData(comp: any): boolean {
  * `data`, so this is a faithful ok/empty/broken per component — the data that
  * produced what the user sees, not privileged backend access.
  */
+/** First unsubstituted {{placeholder}} left in a component's text, if any. */
+function leakedPlaceholder(comp: any): string {
+  for (const field of [comp?.content, comp?.infoboxBody]) {
+    if (typeof field === 'string') {
+      const m = field.match(/\{\{[^}]+\}\}/);
+      if (m) return m[0];
+    }
+  }
+  return '';
+}
+
 export function componentStatesFromReport(rep: any): ComponentRow[] {
   const rows: ComponentRow[] = [];
   for (const s of rep?.sections ?? []) {
     for (const comp of s?.components ?? []) {
+      const leaked = leakedPlaceholder(comp);
       let state: ComponentState;
-      if (comp.error) state = 'broken';
-      else if (hasData(comp)) state = 'ok';
-      else state = 'empty';
+      let error = '';
+      if (comp.error) {
+        state = 'broken';
+        error = String(comp.error).slice(0, 300);
+      } else if (leaked) {
+        // A placeholder the query never filled — the user sees literal {{…}}.
+        state = 'broken';
+        error = `leaked placeholder ${leaked} (alias not returned by the query)`;
+      } else if (hasData(comp)) {
+        state = 'ok';
+      } else {
+        state = 'empty';
+      }
       rows.push({
         section: s.title || s.id || '',
         title: comp.title || comp.type || '(untitled)',
         type: comp.type || '',
         state,
-        error: comp.error ? String(comp.error).slice(0, 300) : '',
+        error,
       });
     }
   }
