@@ -38,6 +38,17 @@ const CELL = { ok: '#16a34a', empty: '#d1d5db', broken: '#dc2626' } as const;
 const LEAK = '#9333ea';
 const SEP = '\u0001';
 
+/**
+ * Row identity for the grid: positional (section #, component #) when available,
+ * so a component whose TITLE interpolates the filter (e.g. "…FOR Q1 2026") still
+ * maps to one row across all combos. Falls back to section+title for older runs.
+ */
+function keyOf(r: ComponentResultRow): string {
+  return r.sectionIndex != null && r.componentIndex != null
+    ? `i${r.sectionIndex}.${r.componentIndex}`
+    : `${r.section}${SEP}${r.component}`;
+}
+
 export default async function generateHtmlReport(): Promise<void> {
   const dir = runDir();
   const comps: ComponentResultRow[] = readJsonl(join(dir, 'components.jsonl'));
@@ -58,7 +69,7 @@ export default async function generateHtmlReport(): Promise<void> {
     const compKeys: { key: string; section: string; component: string }[] = [];
     const seen = new Set<string>();
     for (const r of rows) {
-      const key = `${r.section}${SEP}${r.component}`;
+      const key = keyOf(r);
       if (!seen.has(key)) {
         seen.add(key);
         compKeys.push({ key, section: r.section, component: r.component });
@@ -68,8 +79,8 @@ export default async function generateHtmlReport(): Promise<void> {
     const stateMap = new Map<string, string>();
     const errMap = new Map<string, string>();
     for (const r of rows) {
-      stateMap.set(`${r.section}${SEP}${r.component}${SEP}${r.comboLabel}`, r.state);
-      if (r.error) errMap.set(`${r.section}${SEP}${r.component}${SEP}${r.comboLabel}`, r.error);
+      stateMap.set(`${keyOf(r)}${SEP}${r.comboLabel}`, r.state);
+      if (r.error) errMap.set(`${keyOf(r)}${SEP}${r.comboLabel}`, r.error);
     }
 
     const combosForReport = summary.filter((s) => s.reportId === reportId);
@@ -127,7 +138,7 @@ export default async function generateHtmlReport(): Promise<void> {
         { section: string; component: string; combos: Set<string>; errors: Set<string> }
       >();
       for (const r of brokenRows) {
-        const k = `${r.section}${SEP}${r.component}`;
+        const k = keyOf(r);
         if (!byComp.has(k))
           byComp.set(k, { section: r.section, component: r.component, combos: new Set(), errors: new Set() });
         const g = byComp.get(k)!;
@@ -261,6 +272,7 @@ export default async function generateHtmlReport(): Promise<void> {
     <span class="dot" style="background:${CELL.broken}"></span>broken
     <span class="dot" style="background:${CELL.empty}"></span>empty
     <span class="dot" style="background:${LEAK}"></span>leakage
+    <span class="dot" style="background:#fff;border:1px solid #d1d5db"></span>not checked
   </p>
   <p class="summary"><b>${comps.length}</b> component checks ·
     <span class="chip good">● ${totals.ok} ok</span>

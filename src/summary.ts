@@ -51,6 +51,8 @@ const COMP_HEADER = [
   'type',
   'state',
   'error',
+  'sectionIndex',
+  'componentIndex',
 ].join(',');
 
 /**
@@ -115,6 +117,8 @@ export function appendComponentResult(row: ComponentResultRow): void {
     row.type,
     row.state,
     row.error,
+    row.sectionIndex ?? '',
+    row.componentIndex ?? '',
   ]
     .map(csvCell)
     .join(',');

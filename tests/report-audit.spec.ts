@@ -169,6 +169,8 @@ for (const report of reports) {
           reportId: report.id,
           comboLabel: combo.label,
           varies: combo.varies,
+          sectionIndex: comp.sIdx,
+          componentIndex: comp.cIdx,
           section: comp.section,
           component: comp.title,
           type: comp.type,

@@ -5,6 +5,9 @@ import type { ComponentState } from './types';
 
 /** Per-component result for one filter combo. */
 export interface ComponentRow {
+  /** Positional identity — stable across combos even when titles interpolate filters. */
+  sIdx: number;
+  cIdx: number;
   section: string;
   title: string;
   type: string;
@@ -45,8 +48,12 @@ function leakedPlaceholder(comp: any): string {
 
 export function componentStatesFromReport(rep: any): ComponentRow[] {
   const rows: ComponentRow[] = [];
-  for (const s of rep?.sections ?? []) {
-    for (const comp of s?.components ?? []) {
+  const sections = rep?.sections ?? [];
+  for (let sIdx = 0; sIdx < sections.length; sIdx++) {
+    const s = sections[sIdx] ?? {};
+    const sectionComps = s.components ?? [];
+    for (let cIdx = 0; cIdx < sectionComps.length; cIdx++) {
+      const comp = sectionComps[cIdx] ?? {};
       const leaked = leakedPlaceholder(comp);
       let state: ComponentState;
       let error = '';
@@ -63,6 +70,8 @@ export function componentStatesFromReport(rep: any): ComponentRow[] {
         state = 'empty';
       }
       rows.push({
+        sIdx,
+        cIdx,
         section: s.title || s.id || '',
         title: comp.title || comp.type || '(untitled)',
         type: comp.type || '',

@@ -55,6 +55,10 @@ export interface ComponentResultRow {
   reportId: string;
   comboLabel: string;
   varies: string;
+  /** Positional identity (section #, component #) — stable across combos even
+   * when titles interpolate filter values. Optional for pre-existing run data. */
+  sectionIndex?: number;
+  componentIndex?: number;
   section: string;
   component: string;
   type: string;
