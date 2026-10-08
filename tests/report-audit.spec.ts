@@ -78,6 +78,11 @@ for (const report of reports) {
 
     const filters = await discoverFilters(page, token, report.id);
     const matrix = buildMatrix(filters);
+    // Scale the per-report timeout to the matrix size so a rich matrix on a heavy
+    // report isn't aborted mid-run (each combo may wait up to renderTimeoutMs plus
+    // overhead). The test still finishes as soon as the combos do — this is only a
+    // ceiling, not a fixed wait.
+    test.setTimeout((matrix.length + 2) * (config.renderTimeoutMs + 15_000));
     const brokenCombos: string[] = [];
 
     for (const combo of matrix) {
