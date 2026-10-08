@@ -121,7 +121,7 @@ export default async function generateHtmlReport(): Promise<void> {
   th,td{border:1px solid #eee;padding:4px 6px;white-space:nowrap}
   /* Diagonal combo headers: transparent + no side borders so the angled labels
      aren't occluded by the next column's cell, and no vertical line cuts them. */
-  th.combo{height:170px;padding:0;vertical-align:bottom;background:transparent;border-left:none;border-right:none;border-top:none}
+  th.combo{height:170px;padding:0;vertical-align:bottom;background:transparent;border-top:none;border-left:1px solid #eee;border-right:1px solid #eee}
   th.combo>div{position:relative;width:26px;height:170px}
   th.combo>div>span{position:absolute;bottom:8px;left:50%;transform-origin:left bottom;transform:rotate(-45deg);white-space:nowrap;font-weight:600;font-size:11px;color:#111}
   /* Frozen label columns (stay put during horizontal scroll). */
