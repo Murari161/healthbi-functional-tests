@@ -80,7 +80,18 @@ export default async function generateHtmlReport(): Promise<void> {
     }
     thead += '</tr>';
 
-    let tbody = '';
+    // Combo-status row: one dot per combo (its roll-up state from the summary),
+    // so report-level breakage (e.g. leaked placeholders) shows red in the grid
+    // even when every component cell underneath is green.
+    let tbody = '<tr class="status-row"><td class="sec"></td><td class="comp">— combo status —</td>';
+    for (const combo of combos) {
+      const s = combosForReport.find((x) => x.comboLabel === combo);
+      const color = s ? (CELL as Record<string, string>)[s.state] || 'transparent' : 'transparent';
+      const title = s && s.state === 'broken' ? ` title="${esc(s.brokenComponents || 'broken')}"` : '';
+      tbody += `<td class="cell"${title}><span class="dot" style="background:${color}"></span></td>`;
+    }
+    tbody += '</tr>';
+
     let lastSection = '';
     for (const ck of compKeys) {
       tbody += '<tr>';
@@ -185,6 +196,8 @@ export default async function generateHtmlReport(): Promise<void> {
   td.sec{left:0;color:#6b7280;font-weight:600;max-width:150px;overflow:hidden;text-overflow:ellipsis}
   td.comp{left:150px;max-width:340px;overflow:hidden;text-overflow:ellipsis}
   td.cell{border:1px solid #eee;width:30px;text-align:center;padding:4px 0}
+  tr.status-row td{background:#fafafa;border-bottom:2px solid #d1d5db}
+  tr.status-row td.comp,tr.status-row td.sec{background:#fafafa;font-size:11px;color:#6b7280;font-weight:600}
   .dot{display:inline-block;width:14px;height:14px;border-radius:3px}
   .good{color:#16a34a;font-weight:600}.bad{color:#dc2626;font-weight:600}.muted{color:#9ca3af;font-weight:600}
   .summary{font-size:14px;margin:8px 0 16px}
