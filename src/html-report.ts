@@ -34,6 +34,8 @@ function esc(s: unknown): string {
 }
 
 const CELL = { ok: '#16a34a', empty: '#d1d5db', broken: '#dc2626' } as const;
+/** Leakage: raw {{placeholder}} text reached the user (page works, template didn't). */
+const LEAK = '#9333ea';
 const SEP = '\u0001';
 
 export default async function generateHtmlReport(): Promise<void> {
@@ -86,7 +88,11 @@ export default async function generateHtmlReport(): Promise<void> {
     let tbody = '<tr class="status-row"><td class="sec"></td><td class="comp">— combo status —</td>';
     for (const combo of combos) {
       const s = combosForReport.find((x) => x.comboLabel === combo);
-      const color = s ? (CELL as Record<string, string>)[s.state] || 'transparent' : 'transparent';
+      const color = s
+        ? s.state === 'broken' && s.leakedPlaceholders
+          ? LEAK
+          : (CELL as Record<string, string>)[s.state] || 'transparent'
+        : 'transparent';
       const title = s && s.state === 'broken' ? ` title="${esc(s.brokenComponents || 'broken')}"` : '';
       tbody += `<td class="cell"${title}><span class="dot" style="background:${color}"></span></td>`;
     }
@@ -140,11 +146,23 @@ export default async function generateHtmlReport(): Promise<void> {
       brokenHtml = `<h3 class="bk-title">⚠ Broken components (${byComp.size})</h3><ul class="broken-list">${items}</ul>`;
     }
 
-    // Combos broken with no component-level detail (e.g. leaked {{placeholder}},
-    // report-level timeout): show the combo and its recorded reason.
+    // Leakage: raw {{placeholder}} text reached the user. Its own category.
     const compBrokenCombos = new Set(brokenRows.map((r) => r.comboLabel));
+    const leakedList = combosForReport.filter((s) => s.state === 'broken' && s.leakedPlaceholders);
+    if (leakedList.length > 0) {
+      const items = leakedList
+        .map(
+          (cb) =>
+            `<li><div class="bk-head"><code>${esc(cb.comboLabel)}</code></div><div class="err">${esc(cb.brokenComponents || 'leaked {{placeholder}}')}</div></li>`,
+        )
+        .join('');
+      brokenHtml += `<h3 class="bk-title leak">⬤ Leakage — raw {{placeholder}} shown to the user (${leakedList.length})</h3><ul class="broken-list leak">${items}</ul>`;
+    }
+
+    // Other report-level breakage (whole-report timeout / fetch failure):
+    // broken combos with no failing component query and no leak.
     const comboLevel = combosForReport.filter(
-      (s) => s.state === 'broken' && !compBrokenCombos.has(s.comboLabel),
+      (s) => s.state === 'broken' && !s.leakedPlaceholders && !compBrokenCombos.has(s.comboLabel),
     );
     if (comboLevel.length > 0) {
       const items = comboLevel
@@ -162,6 +180,8 @@ export default async function generateHtmlReport(): Promise<void> {
         <p class="meta">${combos.length} combos · ${compKeys.length} components ·
           <span class="good">${rc.ok} ok</span> / <span class="bad">${rc.broken} broken</span> / <span class="muted">${rc.empty} empty</span> cells ·
           <span class="${brokenCombos ? 'bad' : 'good'}">${brokenCombos} broken combo(s)</span>${
+            leakedList.length > 0 ? ` · <span class="chip leak">⬤ ${leakedList.length} leakage</span>` : ''
+          }${
             comboLevel.length > 0 ? ` · <span class="chip warn">⚠ ${comboLevel.length} report-level</span>` : ''
           }</p>
         <div class="tablewrap"><table>${thead}${tbody}</table></div>
@@ -172,12 +192,18 @@ export default async function generateHtmlReport(): Promise<void> {
   const totals: Record<string, number> = { ok: 0, broken: 0, empty: 0 };
   for (const c of comps) totals[c.state] = (totals[c.state] ?? 0) + 1;
   const totalBrokenCombos = summary.filter((s) => s.state === 'broken').length;
-  // Combos broken with no failing component query = their own category: report-level.
+  // Leakage: combos where raw {{placeholder}} text reached the page.
+  const leakageCombos = summary.filter((s) => s.state === 'broken' && s.leakedPlaceholders).length;
+  // Report-level: broken combos with no failing component query and no leak
+  // (e.g. whole-report timeout / fetch failure).
   const compBrokenKeys = new Set(
     comps.filter((c) => c.state === 'broken').map((c) => `${c.reportId}${SEP}${c.comboLabel}`),
   );
   const reportLevelBrokenCombos = summary.filter(
-    (s) => s.state === 'broken' && !compBrokenKeys.has(`${s.reportId}${SEP}${s.comboLabel}`),
+    (s) =>
+      s.state === 'broken' &&
+      !s.leakedPlaceholders &&
+      !compBrokenKeys.has(`${s.reportId}${SEP}${s.comboLabel}`),
   ).length;
 
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -215,6 +241,10 @@ export default async function generateHtmlReport(): Promise<void> {
   .chip.bad{background:#fee2e2;color:#991b1b}
   .chip.muted{background:#f3f4f6;color:#6b7280}
   .chip.warn{background:#fef3c7;color:#92400e}
+  .chip.leak{background:#f3e8ff;color:#6b21a8}
+  .bk-title.leak{color:#6b21a8}
+  .broken-list.leak>li{border-left-color:#9333ea;background:#faf5ff}
+  .broken-list.leak .err{color:#581c87}
   .bk-title{font-size:13px;margin:16px 0 6px;color:#991b1b}
   .broken-list{list-style:none;padding:0;margin:0 0 10px;max-width:1000px}
   .broken-list>li{border-left:3px solid #dc2626;background:#fef2f2;padding:8px 12px;margin:0 0 8px;border-radius:4px}
@@ -230,11 +260,13 @@ export default async function generateHtmlReport(): Promise<void> {
     <span class="dot" style="background:${CELL.ok}"></span>ok
     <span class="dot" style="background:${CELL.broken}"></span>broken
     <span class="dot" style="background:${CELL.empty}"></span>empty
+    <span class="dot" style="background:${LEAK}"></span>leakage
   </p>
   <p class="summary"><b>${comps.length}</b> component checks ·
     <span class="chip good">● ${totals.ok} ok</span>
     <span class="chip bad">● ${totals.broken} broken</span>
     <span class="chip muted">● ${totals.empty} empty</span>
+    ${leakageCombos > 0 ? `<span class="chip leak">⬤ ${leakageCombos} leakage</span>` : ''}
     ${reportLevelBrokenCombos > 0 ? `<span class="chip warn">⚠ ${reportLevelBrokenCombos} report-level</span>` : ''}
     · <span class="${totalBrokenCombos ? 'bad' : 'good'}">${totalBrokenCombos} of ${summary.length} combos broken</span></p>
   ${reportSections.join('\n')}
@@ -252,7 +284,9 @@ export default async function generateHtmlReport(): Promise<void> {
     `${col('1', 'Audit summary')} — ${byReport.size} report(s) · ${summary.length} combos · ${comps.length} component checks`,
   );
   console.log(
-    `  ${col('32', '●')} ${totals.ok} ok   ${col('31', '●')} ${totals.broken} broken   ${col('90', '●')} ${totals.empty} empty`,
+    `  ${col('32', '●')} ${totals.ok} ok   ${col('31', '●')} ${totals.broken} broken   ${col('90', '●')} ${totals.empty} empty${
+      leakageCombos > 0 ? `   ${col('35', '●')} ${leakageCombos} leakage` : ''
+    }`,
   );
   console.log(
     `  ${totalBrokenCombos > 0 ? col('31', '✗') : col('32', '✓')} ${totalBrokenCombos} of ${summary.length} combo(s) broken${
