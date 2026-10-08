@@ -161,9 +161,9 @@ export default async function generateHtmlReport(): Promise<void> {
         <h2>${esc(reportId)}</h2>
         <p class="meta">${combos.length} combos · ${compKeys.length} components ·
           <span class="good">${rc.ok} ok</span> / <span class="bad">${rc.broken} broken</span> / <span class="muted">${rc.empty} empty</span> cells ·
-          <span class="${brokenCombos ? 'bad' : 'good'}">${brokenCombos} broken combo(s)${
-            brokenCombos > 0 && rc.broken === 0 ? ' — report-level, no query failed' : ''
-          }</span></p>
+          <span class="${brokenCombos ? 'bad' : 'good'}">${brokenCombos} broken combo(s)</span>${
+            comboLevel.length > 0 ? ` · <span class="chip warn">⚠ ${comboLevel.length} report-level</span>` : ''
+          }</p>
         <div class="tablewrap"><table>${thead}${tbody}</table></div>
         ${brokenHtml}
       </section>`);
@@ -172,6 +172,13 @@ export default async function generateHtmlReport(): Promise<void> {
   const totals: Record<string, number> = { ok: 0, broken: 0, empty: 0 };
   for (const c of comps) totals[c.state] = (totals[c.state] ?? 0) + 1;
   const totalBrokenCombos = summary.filter((s) => s.state === 'broken').length;
+  // Combos broken with no failing component query = their own category: report-level.
+  const compBrokenKeys = new Set(
+    comps.filter((c) => c.state === 'broken').map((c) => `${c.reportId}${SEP}${c.comboLabel}`),
+  );
+  const reportLevelBrokenCombos = summary.filter(
+    (s) => s.state === 'broken' && !compBrokenKeys.has(`${s.reportId}${SEP}${s.comboLabel}`),
+  ).length;
 
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -207,6 +214,7 @@ export default async function generateHtmlReport(): Promise<void> {
   .chip.good{background:#dcfce7;color:#166534}
   .chip.bad{background:#fee2e2;color:#991b1b}
   .chip.muted{background:#f3f4f6;color:#6b7280}
+  .chip.warn{background:#fef3c7;color:#92400e}
   .bk-title{font-size:13px;margin:16px 0 6px;color:#991b1b}
   .broken-list{list-style:none;padding:0;margin:0 0 10px;max-width:1000px}
   .broken-list>li{border-left:3px solid #dc2626;background:#fef2f2;padding:8px 12px;margin:0 0 8px;border-radius:4px}
@@ -227,9 +235,8 @@ export default async function generateHtmlReport(): Promise<void> {
     <span class="chip good">● ${totals.ok} ok</span>
     <span class="chip bad">● ${totals.broken} broken</span>
     <span class="chip muted">● ${totals.empty} empty</span>
-    · <span class="${totalBrokenCombos ? 'bad' : 'good'}">${totalBrokenCombos} of ${summary.length} combos broken${
-      totalBrokenCombos > 0 && totals.broken === 0 ? ' — report-level (template/timeout), no query failed' : ''
-    }</span></p>
+    ${reportLevelBrokenCombos > 0 ? `<span class="chip warn">⚠ ${reportLevelBrokenCombos} report-level</span>` : ''}
+    · <span class="${totalBrokenCombos ? 'bad' : 'good'}">${totalBrokenCombos} of ${summary.length} combos broken</span></p>
   ${reportSections.join('\n')}
 </body></html>`;
 
@@ -248,6 +255,8 @@ export default async function generateHtmlReport(): Promise<void> {
     `  ${col('32', '●')} ${totals.ok} ok   ${col('31', '●')} ${totals.broken} broken   ${col('90', '●')} ${totals.empty} empty`,
   );
   console.log(
-    `  ${totalBrokenCombos > 0 ? col('31', '✗') : col('32', '✓')} ${totalBrokenCombos} of ${summary.length} combo(s) broken`,
+    `  ${totalBrokenCombos > 0 ? col('31', '✗') : col('32', '✓')} ${totalBrokenCombos} of ${summary.length} combo(s) broken${
+      reportLevelBrokenCombos > 0 ? col('33', ` (${reportLevelBrokenCombos} report-level)`) : ''
+    }`,
   );
 }
