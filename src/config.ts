@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
  * Central configuration, read from environment (.env). See .env.example.
@@ -60,6 +62,26 @@ export const config = {
    */
   renderTimeoutMs: num('RENDER_TIMEOUT_MS', 60_000),
 };
+
+/**
+ * This run's output directory, results/<run-id>. globalSetup picks a fresh run id
+ * per run and shares it via the AUDIT_RUN_ID env var (inherited by test workers)
+ * and a results/.run-id marker (for standalone `report:html`). A fresh folder per
+ * run means a new run never clobbers output you still have open (e.g. summary.csv
+ * in Excel) — the cause of EBUSY errors. Falls back to the marker, then 'latest'.
+ */
+export function runDir(): string {
+  let id = process.env.AUDIT_RUN_ID || '';
+  if (!id) {
+    try {
+      const marker = join(config.resultsDir, '.run-id');
+      if (existsSync(marker)) id = readFileSync(marker, 'utf8').trim();
+    } catch {
+      /* ignore */
+    }
+  }
+  return join(config.resultsDir, id || 'latest');
+}
 
 /** Build a deep-link URL for a report + a filter combo (param -> value). */
 export function reportUrl(reportId: string, combo: Record<string, string>): string {

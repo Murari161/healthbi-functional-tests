@@ -1,5 +1,6 @@
 import { chromium, type FullConfig } from '@playwright/test';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { config } from './config';
 import { attachTokenCapture, waitForToken } from './auth-capture';
 
@@ -29,7 +30,14 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
           'Re-run `npm run prepare-run` to log in again, then re-run the audit.',
       );
     }
-    console.log('✓ Session valid — auth token captured. Starting audit.');
+    // Establish this run's own output folder (results/<run-id>) so a new run
+    // never clobbers files you still have open (e.g. summary.csv in Excel).
+    const runId = new Date().toISOString().replace(/[:.]/g, '-');
+    process.env.AUDIT_RUN_ID = runId; // inherited by test workers + teardown
+    mkdirSync(config.resultsDir, { recursive: true });
+    writeFileSync(join(config.resultsDir, '.run-id'), runId, 'utf8');
+    mkdirSync(join(config.resultsDir, runId), { recursive: true });
+    console.log(`✓ Session valid. Output → ${join(config.resultsDir, runId)}`);
   } finally {
     await browser.close();
   }

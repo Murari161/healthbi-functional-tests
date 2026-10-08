@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { config, reportUrl } from '../src/config';
+import { config, reportUrl, runDir } from '../src/config';
 import { discoverFilters, buildMatrix } from '../src/filters';
 import { attachTokenCapture, waitForToken } from '../src/auth-capture';
 import { classifyReport } from '../src/classify';
@@ -121,7 +121,7 @@ for (const report of reports) {
       // Screenshots. Full page content via the sections container (captures its
       // whole height — the app scrolls an inner container, so fullPage misses it).
       const comboSlug = slug(combo.label);
-      const fullShot = join(config.resultsDir, 'screenshots', `${slug(report.id)}__${comboSlug}.png`);
+      const fullShot = join(runDir(), 'screenshots', `${slug(report.id)}__${comboSlug}.png`);
       await page
         .locator('#sections-container')
         .screenshot({ path: fullShot })
@@ -136,7 +136,7 @@ for (const report of reports) {
           (await errorCards.nth(i).locator('.component-error-title').textContent().catch(() => '')) ||
           `component_${i}`;
         const cshot = join(
-          config.resultsDir,
+          runDir(),
           'screenshots',
           'components',
           `${slug(report.id)}__${comboSlug}__${slug(name)}.png`,

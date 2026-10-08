@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { config } from './config';
+import { runDir } from './config';
 import type { ComponentResultRow } from './types';
 
 /**
@@ -37,8 +37,9 @@ const CELL = { ok: '#16a34a', empty: '#d1d5db', broken: '#dc2626' } as const;
 const SEP = '\u0001';
 
 export default async function generateHtmlReport(): Promise<void> {
-  const comps: ComponentResultRow[] = readJsonl(join(config.resultsDir, 'components.jsonl'));
-  const summary = readJsonl(join(config.resultsDir, 'summary.jsonl'));
+  const dir = runDir();
+  const comps: ComponentResultRow[] = readJsonl(join(dir, 'components.jsonl'));
+  const summary = readJsonl(join(dir, 'summary.jsonl'));
   if (comps.length === 0) return;
 
   const byReport = new Map<string, ComponentResultRow[]>();
@@ -134,7 +135,7 @@ export default async function generateHtmlReport(): Promise<void> {
   ${reportSections.join('\n')}
 </body></html>`;
 
-  const out = join(config.resultsDir, 'report.html');
+  const out = join(dir, 'report.html');
   writeFileSync(out, html, 'utf8');
   console.log(`✓ Component grid → ${out}`);
 }

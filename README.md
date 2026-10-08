@@ -133,7 +133,10 @@ chosen district, like the UI.
 
 ## Output
 
-Under `results/` (gitignored):
+Each run writes to its **own folder** `results/<run-id>/` (gitignored; the exact
+path is printed at startup as `Output → …`). A fresh folder per run means a new
+run never clobbers files you still have open (e.g. `summary.csv` in Excel).
+`npm run report:html` targets the most recent run. In that folder:
 - **`report.html`** — the **red/green grid**: per report, rows = components
   (grouped by section), columns = filter combos, cells 🟩 ok / 🟥 broken / ⬜ empty
   (hover a red cell for the error). Open this first. Regenerate anytime with
