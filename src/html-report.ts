@@ -129,6 +129,22 @@ export default async function generateHtmlReport(): Promise<void> {
       brokenHtml = `<h3 class="bk-title">⚠ Broken components (${byComp.size})</h3><ul class="broken-list">${items}</ul>`;
     }
 
+    // Combos broken with no component-level detail (e.g. leaked {{placeholder}},
+    // report-level timeout): show the combo and its recorded reason.
+    const compBrokenCombos = new Set(brokenRows.map((r) => r.comboLabel));
+    const comboLevel = combosForReport.filter(
+      (s) => s.state === 'broken' && !compBrokenCombos.has(s.comboLabel),
+    );
+    if (comboLevel.length > 0) {
+      const items = comboLevel
+        .map(
+          (cb) =>
+            `<li><div class="bk-head"><code>${esc(cb.comboLabel)}</code></div><div class="err">${esc(cb.brokenComponents || 'broken (no detail recorded)')}</div></li>`,
+        )
+        .join('');
+      brokenHtml += `<h3 class="bk-title">⚠ Broken combos — report-level (${comboLevel.length})</h3><ul class="broken-list">${items}</ul>`;
+    }
+
     reportSections.push(`
       <section class="report">
         <h2>${esc(reportId)}</h2>

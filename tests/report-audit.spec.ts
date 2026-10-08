@@ -116,6 +116,7 @@ for (const report of reports) {
       const brokenTitles = [
         ...brokenComps.map((c) => c.title),
         ...dom.brokenComponents.filter((t) => t.startsWith('REPORT:')),
+        ...(dom.leakedPlaceholders ? [`leaked placeholder → ${dom.leakedSamples.join(' | ')}`] : []),
         ...(noData ? ['(report fetch failed)'] : []),
       ];
 
@@ -184,7 +185,7 @@ for (const report of reports) {
             ? dom.neverRendered
               ? 'never rendered'
               : dom.leakedPlaceholders
-                ? 'leaked {{placeholder}}'
+                ? `leaked: ${dom.leakedSamples.join(' | ')}`
                 : dom.brokenComponents.filter((t) => t.startsWith('REPORT:')).join(', ')
             : `failed: ${brokenComps.map((c) => c.title).join(', ')}`;
         brokenCombos.push(`[${combo.label}] ${detail}`);

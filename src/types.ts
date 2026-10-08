@@ -41,6 +41,8 @@ export interface ReportClassification {
   emptyCount: number;
   /** Titles of components that rendered an error card. */
   brokenComponents: string[];
+  /** The actual leaked {{alias}} strings found in the page (KPI-attributed where possible). */
+  leakedSamples: string[];
   /** True if raw {{placeholder}} text leaked into the page. */
   leakedPlaceholders: boolean;
   /** True if the report shell never rendered at all. */

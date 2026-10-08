@@ -47,9 +47,28 @@ export async function classifyReport(page: Page): Promise<ReportClassification> 
       brokenComponents.unshift(`REPORT: ${msg}`);
     }
 
-    // Leaked, unsubstituted placeholders indicate a filter/alias bug.
-    const text = root ? (root as HTMLElement).innerText || '' : '';
-    const leakedPlaceholders = /\{\{[^}]+\}\}/.test(text);
+    // Leaked, unsubstituted placeholders indicate a filter/alias bug. Capture the
+    // actual {{alias}} strings (attributed to a KPI card title where possible) so
+    // the report can say WHICH placeholder leaked, not just that one did.
+    const leakedSamples: string[] = [];
+    if (root) {
+      const seen = new Set<string>();
+      root.querySelectorAll('.kpi-card').forEach((card) => {
+        const t = (card as HTMLElement).innerText || '';
+        const m = t.match(/\{\{[^}]+\}\}/g);
+        if (m) {
+          const title = card.querySelector('.kpi-card__title')?.textContent?.trim() || 'KPI';
+          leakedSamples.push(`${title}: ${Array.from(new Set(m)).join(' ')}`);
+          m.forEach((x) => seen.add(x));
+        }
+      });
+      const all = ((root as HTMLElement).innerText || '').match(/\{\{[^}]+\}\}/g) || [];
+      for (const x of Array.from(new Set(all))) {
+        if (leakedSamples.length >= 6) break;
+        if (!seen.has(x)) leakedSamples.push(x);
+      }
+    }
+    const leakedPlaceholders = leakedSamples.length > 0;
 
     // Best-effort "rendered with data" signals.
     const canvases = root ? root.querySelectorAll('canvas').length : 0; // charts + maps
@@ -75,6 +94,7 @@ export async function classifyReport(page: Page): Promise<ReportClassification> 
       okCount,
       emptyCount: Math.max(0, totalComponents - okCount - brokenComponents.length),
       brokenComponents,
+      leakedSamples,
       leakedPlaceholders,
       neverRendered,
     };
