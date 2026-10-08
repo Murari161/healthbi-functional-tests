@@ -139,7 +139,8 @@ sweep). It's gitignored, and the exact path is printed at startup as `Output →
 A fresh folder per run means a new run never clobbers files you still have open
 (e.g. `summary.csv` in Excel). `npm run report:html` targets the most recent run.
 In that folder:
-- **`report.html`** — the **red/green grid**: per report, rows = components
+- **`<run-folder-name>.html`** (e.g. `wash-report-plus1__2026-10-08T….html`) — the
+  **red/green grid**: per report, rows = components
   (grouped by section), columns = filter combos, cells 🟩 ok / 🟥 broken / ⬜ empty
   (hover a red cell for the error). Open this first. Regenerate anytime with
   `npm run report:html`.

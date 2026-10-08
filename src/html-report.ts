@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { runDir } from './config';
 import type { ComponentResultRow } from './types';
 
@@ -292,7 +292,9 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   ${reportSections.join('\n')}
 </body></html>`;
 
-  const out = join(dir, 'report.html');
+  // Name the file after the run folder (report name + timestamp) so it stays
+  // identifiable when opened in a browser tab or shared outside its folder.
+  const out = join(dir, `${basename(dir)}.html`);
   writeFileSync(out, html, 'utf8');
   console.log(`✓ Component grid → ${out}`);
 
