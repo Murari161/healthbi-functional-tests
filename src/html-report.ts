@@ -74,7 +74,10 @@ export default async function generateHtmlReport(): Promise<void> {
     const brokenCombos = combosForReport.filter((s) => s.state === 'broken').length;
 
     let thead = '<tr><th class="sticky sech">Section</th><th class="sticky comph">Component</th>';
-    for (const combo of combos) thead += `<th class="combo sticky">${esc(combo)}</th>`;
+    for (const combo of combos) {
+      const disp = combo.length > 30 ? `${combo.slice(0, 29)}…` : combo;
+      thead += `<th class="combo sticky"><div><span title="${esc(combo)}">${esc(disp)}</span></div></th>`;
+    }
     thead += '</tr>';
 
     let tbody = '';
@@ -116,7 +119,9 @@ export default async function generateHtmlReport(): Promise<void> {
   .tablewrap{overflow:auto;border:1px solid #e5e7eb;border-radius:8px;max-height:72vh}
   table{border-collapse:collapse;font-size:12px}
   th,td{border:1px solid #eee;padding:4px 6px;white-space:nowrap}
-  th.combo{writing-mode:vertical-rl;transform:rotate(180deg);height:170px;vertical-align:bottom;font-weight:600;background:#f9fafb}
+  th.combo{height:195px;padding:0;vertical-align:bottom;background:#f9fafb}
+  th.combo>div{position:relative;width:26px;height:195px}
+  th.combo>div>span{position:absolute;bottom:8px;left:50%;transform-origin:left bottom;transform:rotate(-45deg);white-space:nowrap;font-weight:600;font-size:11px}
   th.sticky{position:sticky;top:0;z-index:3;background:#f9fafb}
   td.comp,td.sec{position:sticky;left:0;background:#fff;z-index:1}
   td.comp{max-width:340px;overflow:hidden;text-overflow:ellipsis;left:150px}
