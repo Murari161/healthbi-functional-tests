@@ -97,14 +97,52 @@ export default async function generateHtmlReport(): Promise<void> {
       tbody += '</tr>';
     }
 
+    const rc: Record<string, number> = { ok: 0, broken: 0, empty: 0 };
+    for (const r of rows) rc[r.state] = (rc[r.state] ?? 0) + 1;
+
+    // Broken-components detail: group broken cells by component, with the error
+    // message(s) and which combos each broke under.
+    const brokenRows = rows.filter((r) => r.state === 'broken');
+    let brokenHtml = '';
+    if (brokenRows.length > 0) {
+      const byComp = new Map<
+        string,
+        { section: string; component: string; combos: Set<string>; errors: Set<string> }
+      >();
+      for (const r of brokenRows) {
+        const k = `${r.section}${SEP}${r.component}`;
+        if (!byComp.has(k))
+          byComp.set(k, { section: r.section, component: r.component, combos: new Set(), errors: new Set() });
+        const g = byComp.get(k)!;
+        g.combos.add(r.comboLabel);
+        if (r.error) g.errors.add(r.error);
+      }
+      const items = [...byComp.values()]
+        .map((g) => {
+          const errHtml = g.errors.size
+            ? [...g.errors].map((e) => `<div class="err">${esc(e)}</div>`).join('')
+            : '<div class="err err-none">Failed to load data (no error detail returned)</div>';
+          const combosTxt = [...g.combos].map((c) => `<code>${esc(c)}</code>`).join(', ');
+          return `<li><div class="bk-head">${g.section ? `<span class="bk-sec">${esc(g.section)}</span> ` : ''}<b>${esc(g.component)}</b></div>${errHtml}<div class="bk-combos">under: ${combosTxt}</div></li>`;
+        })
+        .join('');
+      brokenHtml = `<h3 class="bk-title">⚠ Broken components (${byComp.size})</h3><ul class="broken-list">${items}</ul>`;
+    }
+
     reportSections.push(`
       <section class="report">
         <h2>${esc(reportId)}</h2>
         <p class="meta">${combos.length} combos · ${compKeys.length} components ·
+          <span class="good">${rc.ok} ok</span> / <span class="bad">${rc.broken} broken</span> / <span class="muted">${rc.empty} empty</span> cells ·
           <span class="${brokenCombos ? 'bad' : 'good'}">${brokenCombos} broken combo(s)</span></p>
         <div class="tablewrap"><table>${thead}${tbody}</table></div>
+        ${brokenHtml}
       </section>`);
   }
+
+  const totals: Record<string, number> = { ok: 0, broken: 0, empty: 0 };
+  for (const c of comps) totals[c.state] = (totals[c.state] ?? 0) + 1;
+  const totalBrokenCombos = summary.filter((s) => s.state === 'broken').length;
 
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -132,7 +170,21 @@ export default async function generateHtmlReport(): Promise<void> {
   td.comp{left:150px;max-width:340px;overflow:hidden;text-overflow:ellipsis}
   td.cell{border:1px solid #eee;width:30px;text-align:center;padding:4px 0}
   .dot{display:inline-block;width:14px;height:14px;border-radius:3px}
-  .good{color:#16a34a;font-weight:600}.bad{color:#dc2626;font-weight:600}
+  .good{color:#16a34a;font-weight:600}.bad{color:#dc2626;font-weight:600}.muted{color:#9ca3af;font-weight:600}
+  .summary{font-size:14px;margin:8px 0 16px}
+  .chip{display:inline-block;padding:2px 9px;border-radius:11px;margin-right:6px;font-weight:600;font-size:13px}
+  .chip.good{background:#dcfce7;color:#166534}
+  .chip.bad{background:#fee2e2;color:#991b1b}
+  .chip.muted{background:#f3f4f6;color:#6b7280}
+  .bk-title{font-size:13px;margin:16px 0 6px;color:#991b1b}
+  .broken-list{list-style:none;padding:0;margin:0 0 10px;max-width:1000px}
+  .broken-list>li{border-left:3px solid #dc2626;background:#fef2f2;padding:8px 12px;margin:0 0 8px;border-radius:4px}
+  .bk-head{font-size:13px}
+  .bk-sec{color:#6b7280;font-weight:600}
+  .err{font-family:ui-monospace,monospace;font-size:12px;color:#7f1d1d;margin:4px 0;white-space:pre-wrap;word-break:break-word}
+  .err-none{color:#9ca3af;font-style:italic}
+  .bk-combos{font-size:12px;color:#555;margin-top:2px}
+  .bk-combos code{background:#fff;border:1px solid #fecaca;border-radius:3px;padding:0 4px}
 </style></head><body>
   <h1>Report functional audit — component × filter grid</h1>
   <p class="legend">Generated ${esc(new Date().toLocaleString())} ·
@@ -140,6 +192,11 @@ export default async function generateHtmlReport(): Promise<void> {
     <span class="dot" style="background:${CELL.broken}"></span>broken
     <span class="dot" style="background:${CELL.empty}"></span>empty
   </p>
+  <p class="summary"><b>${comps.length}</b> component checks ·
+    <span class="chip good">● ${totals.ok} ok</span>
+    <span class="chip bad">● ${totals.broken} broken</span>
+    <span class="chip muted">● ${totals.empty} empty</span>
+    · <span class="${totalBrokenCombos ? 'bad' : 'good'}">${totalBrokenCombos} of ${summary.length} combos broken</span></p>
   ${reportSections.join('\n')}
 </body></html>`;
 
@@ -148,9 +205,6 @@ export default async function generateHtmlReport(): Promise<void> {
   console.log(`✓ Component grid → ${out}`);
 
   // Conclusive, colored summary (Playwright still prints its own passed/failed).
-  const cells: Record<string, number> = { ok: 0, broken: 0, empty: 0 };
-  for (const c of comps) cells[c.state] = (cells[c.state] ?? 0) + 1;
-  const brokenCombos = summary.filter((s) => s.state === 'broken').length;
   const tty = !!process.stdout.isTTY;
   const col = (code: string, s: string) => (tty ? `\x1b[${code}m${s}\x1b[0m` : s);
   console.log('');
@@ -158,9 +212,9 @@ export default async function generateHtmlReport(): Promise<void> {
     `${col('1', 'Audit summary')} — ${byReport.size} report(s) · ${summary.length} combos · ${comps.length} component checks`,
   );
   console.log(
-    `  ${col('32', '●')} ${cells.ok} ok   ${col('31', '●')} ${cells.broken} broken   ${col('90', '●')} ${cells.empty} empty`,
+    `  ${col('32', '●')} ${totals.ok} ok   ${col('31', '●')} ${totals.broken} broken   ${col('90', '●')} ${totals.empty} empty`,
   );
   console.log(
-    `  ${brokenCombos > 0 ? col('31', '✗') : col('32', '✓')} ${brokenCombos} of ${summary.length} combo(s) broken`,
+    `  ${totalBrokenCombos > 0 ? col('31', '✗') : col('32', '✓')} ${totalBrokenCombos} of ${summary.length} combo(s) broken`,
   );
 }
