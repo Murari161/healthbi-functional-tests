@@ -5,6 +5,21 @@ import { config } from './config';
 import { attachTokenCapture, waitForToken } from './auth-capture';
 
 /**
+ * A readable label for the run folder, derived from REPORT_SCOPE: the report's
+ * last path segment (the report name), slugged and capped at 40 chars. "all" for
+ * a full sweep, "<name>-plusN" when several reports are scoped. Combined with a
+ * timestamp so folders are both identifiable and unique.
+ */
+function runLabel(scope: string): string {
+  if (!scope || scope === 'all') return 'all';
+  const ids = scope.split(',').map((s) => s.trim()).filter(Boolean);
+  const first = ids[0] || 'report';
+  const name = first.split('/').pop() || first;
+  const slug = name.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'report';
+  return ids.length > 1 ? `${slug}-plus${ids.length - 1}` : slug;
+}
+
+/**
  * Runs once before the whole suite. Verifies the saved session is still valid
  * (the app mints an auth token) so an EXPIRED session fails the run fast with a
  * clear message — instead of every report waiting the full render timeout and
@@ -32,7 +47,8 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
     }
     // Establish this run's own output folder (results/<run-id>) so a new run
     // never clobbers files you still have open (e.g. summary.csv in Excel).
-    const runId = new Date().toISOString().replace(/[:.]/g, '-');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const runId = `${runLabel(config.scope)}__${stamp}`;
     process.env.AUDIT_RUN_ID = runId; // inherited by test workers + teardown
     mkdirSync(config.resultsDir, { recursive: true });
     writeFileSync(join(config.resultsDir, '.run-id'), runId, 'utf8');
