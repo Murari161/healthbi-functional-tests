@@ -161,7 +161,9 @@ export default async function generateHtmlReport(): Promise<void> {
         <h2>${esc(reportId)}</h2>
         <p class="meta">${combos.length} combos · ${compKeys.length} components ·
           <span class="good">${rc.ok} ok</span> / <span class="bad">${rc.broken} broken</span> / <span class="muted">${rc.empty} empty</span> cells ·
-          <span class="${brokenCombos ? 'bad' : 'good'}">${brokenCombos} broken combo(s)</span></p>
+          <span class="${brokenCombos ? 'bad' : 'good'}">${brokenCombos} broken combo(s)${
+            brokenCombos > 0 && rc.broken === 0 ? ' — report-level, no query failed' : ''
+          }</span></p>
         <div class="tablewrap"><table>${thead}${tbody}</table></div>
         ${brokenHtml}
       </section>`);
@@ -225,7 +227,9 @@ export default async function generateHtmlReport(): Promise<void> {
     <span class="chip good">● ${totals.ok} ok</span>
     <span class="chip bad">● ${totals.broken} broken</span>
     <span class="chip muted">● ${totals.empty} empty</span>
-    · <span class="${totalBrokenCombos ? 'bad' : 'good'}">${totalBrokenCombos} of ${summary.length} combos broken</span></p>
+    · <span class="${totalBrokenCombos ? 'bad' : 'good'}">${totalBrokenCombos} of ${summary.length} combos broken${
+      totalBrokenCombos > 0 && totals.broken === 0 ? ' — report-level (template/timeout), no query failed' : ''
+    }</span></p>
   ${reportSections.join('\n')}
 </body></html>`;
 
