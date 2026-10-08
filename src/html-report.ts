@@ -121,16 +121,16 @@ export default async function generateHtmlReport(): Promise<void> {
   th,td{border:1px solid #eee;padding:4px 6px;white-space:nowrap}
   /* Diagonal combo headers: transparent + no side borders so the angled labels
      aren't occluded by the next column's cell, and no vertical line cuts them. */
-  th.combo{height:170px;padding:0;vertical-align:bottom;background:transparent;border-top:none;border-left:1px solid #eee;border-right:1px solid #eee}
-  th.combo>div{position:relative;width:26px;height:170px}
-  th.combo>div>span{position:absolute;bottom:8px;left:50%;transform-origin:left bottom;transform:rotate(-45deg);white-space:nowrap;font-weight:600;font-size:11px;color:#111}
+  th.combo{height:150px;padding:0;border:none;background:transparent;white-space:nowrap}
+  th.combo>div{width:30px;transform:translate(22px,55px) rotate(315deg)}
+  th.combo>div>span{border-bottom:1px solid #bbb;padding:5px 10px;font-weight:600;font-size:11px;color:#111}
   /* Frozen label columns (stay put during horizontal scroll). */
   th.sech,th.comph{position:sticky;background:#f9fafb;vertical-align:bottom;font-weight:700;z-index:2}
   th.sech{left:0} th.comph{left:150px}
   td.sec,td.comp{position:sticky;background:#fff;z-index:1}
   td.sec{left:0;color:#6b7280;font-weight:600;max-width:150px;overflow:hidden;text-overflow:ellipsis}
   td.comp{left:150px;max-width:340px;overflow:hidden;text-overflow:ellipsis}
-  .cell{text-align:center}
+  td.cell{border:1px solid #eee;width:30px;text-align:center;padding:4px 0}
   .dot{display:inline-block;width:14px;height:14px;border-radius:3px}
   .good{color:#16a34a;font-weight:600}.bad{color:#dc2626;font-weight:600}
 </style></head><body>
