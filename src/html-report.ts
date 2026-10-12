@@ -96,31 +96,47 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     const combosForReport = summary.filter((s) => s.reportId === reportId);
     const brokenCombos = combosForReport.filter((s) => s.state === 'broken').length;
 
-    let thead = '<tr><th class="sech">Section</th><th class="comph">Component</th>';
-    combos.forEach((combo, i) => {
-      const disp = combo.length > 24 ? `${combo.slice(0, 23)}…` : combo;
-      thead += `<th class="combo"><div><span title="${esc(combo)}">${i + 1}. ${esc(disp)}</span></div></th>`;
+    // Download status per component (downloads run once per report, on baseline).
+    const rdl = dls.filter((d) => d.reportId === reportId);
+    const rdlFailed = rdl.filter((d) => !d.ok);
+    const normTitle = (t: string) =>
+      t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+    const DL_TYPES = ['table', 'table_advanced', 'bar', 'line', 'bar_line', 'pie', 'pyramid', 'waterfall'];
+    const dlStatusFor = (title: string, type: string): { cls: string; text: string; tip: string } => {
+      const n = normTitle(title);
+      const matches = n ? rdl.filter((d) => (d.label || d.filename).toLowerCase().includes(n)) : [];
+      if (matches.length > 0) {
+        const bad = matches.filter((m) => !m.ok);
+        return bad.length
+          ? { cls: 'bad', text: '✗ failed', tip: bad.map((m) => m.error).join('; ') }
+          : { cls: 'good', text: '✓ ok', tip: matches.map((m) => m.filename).join('; ') };
+      }
+      return DL_TYPES.includes(type)
+        ? { cls: 'warnt', text: 'missing', tip: 'no download control found for this component' }
+        : { cls: 'na', text: '–', tip: 'no download for this component type by design' };
+    };
+
+    // Column headers carry the FULL effective filter combination; header height
+    // scales with the longest label (tooltip always holds the complete text).
+    const headerLabels = combos.map((c, i) => {
+      const s = combosForReport.find((x) => x.comboLabel === c);
+      return `${i + 1}. ${s?.effective || c}`;
+    });
+    const maxLen = Math.max(10, ...headerLabels.map((l) => l.length));
+    const hdrH = Math.min(430, Math.max(150, Math.ceil(maxLen * 4.3) + 30));
+    const maxChars = Math.floor((430 - 30) / 4.3);
+    let thead = '<tr><th class="sech">Section</th><th class="comph">Component</th><th class="dlh">Downloads</th>';
+    headerLabels.forEach((label) => {
+      const disp = label.length > maxChars ? `${label.slice(0, maxChars - 1)}…` : label;
+      thead += `<th class="combo" style="height:${hdrH}px"><div style="height:${hdrH}px"><span title="${esc(label)}">${esc(disp)}</span></div></th>`;
     });
     thead += '</tr>';
-
-    // Combo key: the full filter set behind each numbered column, with its status.
-    const comboKey = combos
-      .map((c, i) => {
-        const s = combosForReport.find((x) => x.comboLabel === c);
-        const color = s
-          ? s.state === 'broken' && s.leakedPlaceholders
-            ? LEAK
-            : (CELL as Record<string, string>)[s.state] || '#d1d5db'
-          : '#d1d5db';
-        const full = s?.effective || c; // full filter enumeration (older runs fall back to the label)
-        return `<li title="requested: ${esc(c)}"><span class="dot" style="background:${color};width:10px;height:10px"></span> <b>${i + 1}.</b> ${esc(full)}</li>`;
-      })
-      .join('');
 
     // Combo-status row: one dot per combo (its roll-up state from the summary),
     // so report-level breakage (e.g. leaked placeholders) shows red in the grid
     // even when every component cell underneath is green.
-    let tbody = '<tr class="status-row"><td class="sec"></td><td class="comp">— combo status —</td>';
+    let tbody =
+      '<tr class="status-row"><td class="sec"></td><td class="comp">— combo status —</td><td class="dlcell"></td>';
     for (const combo of combos) {
       const s = combosForReport.find((x) => x.comboLabel === combo);
       const color = s
@@ -139,6 +155,9 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       tbody += `<td class="sec">${ck.section !== lastSection ? esc(ck.section) : ''}</td>`;
       lastSection = ck.section;
       tbody += `<td class="comp" title="${esc(ck.component)}">${esc(ck.component)}</td>`;
+      const firstRow = rows.find((r) => keyOf(r) === ck.key);
+      const dstat = dlStatusFor(ck.component, firstRow?.type || '');
+      tbody += `<td class="dlcell ${dstat.cls}" title="${esc(dstat.tip)}">${dstat.text}</td>`;
       for (const combo of combos) {
         const st = stateMap.get(`${ck.key}${SEP}${combo}`) || '';
         const err = errMap.get(`${ck.key}${SEP}${combo}`) || '';
@@ -221,9 +240,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       brokenHtml += `<h3 class="bk-title std">☰ Standards warnings (${rst.length})</h3><ul class="broken-list std">${items}</ul>`;
     }
 
-    // Download checks (run once per report on the baseline combo).
-    const rdl = dls.filter((d) => d.reportId === reportId);
-    const rdlFailed = rdl.filter((d) => !d.ok);
+    // Failed-download details (statuses per component are in the Downloads column).
     if (rdlFailed.length > 0) {
       const items = rdlFailed
         .map(
@@ -249,7 +266,6 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
               : ''
           }${rst.length > 0 ? ` · <span class="chip std">☰ ${rst.length} standards</span>` : ''}</p>
         <div class="tablewrap"><table>${thead}${tbody}</table></div>
-        <ol class="combo-key">${comboKey}</ol>
         ${brokenHtml}
       </section>`);
   }
@@ -296,9 +312,12 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
      the painted width and they can never cover the first dot columns. */
   th.sech,td.sec{width:150px;min-width:150px;max-width:150px}
   th.comph,td.comp{width:340px;min-width:340px;max-width:340px}
-  .combo-key{font-size:12px;list-style:none;margin:8px 0 4px;padding:0;columns:2;max-width:1100px}
-  .combo-key li{margin:2px 0;break-inside:avoid}
-  .combo-key .dot{display:inline-block;border-radius:2px;vertical-align:-1px}
+  th.dlh{background:transparent;vertical-align:bottom;font-weight:700;width:86px;min-width:86px;max-width:86px}
+  td.dlcell{border:1px solid #eee;width:86px;min-width:86px;max-width:86px;text-align:center;font-size:11px;white-space:nowrap}
+  td.dlcell.good{color:#16a34a;font-weight:600}
+  td.dlcell.bad{color:#dc2626;font-weight:700}
+  td.dlcell.warnt{color:#b45309;font-weight:600}
+  td.dlcell.na{color:#9ca3af}
   td.sec,td.comp{position:sticky;background:#fff;z-index:1}
   td.sec{left:0;color:#6b7280;font-weight:600;max-width:150px;overflow:hidden;text-overflow:ellipsis}
   td.comp{left:150px;max-width:340px;overflow:hidden;text-overflow:ellipsis}
