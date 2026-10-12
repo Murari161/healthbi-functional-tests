@@ -97,11 +97,24 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     const brokenCombos = combosForReport.filter((s) => s.state === 'broken').length;
 
     let thead = '<tr><th class="sech">Section</th><th class="comph">Component</th>';
-    for (const combo of combos) {
-      const disp = combo.length > 30 ? `${combo.slice(0, 29)}…` : combo;
-      thead += `<th class="combo"><div><span title="${esc(combo)}">${esc(disp)}</span></div></th>`;
-    }
+    combos.forEach((combo, i) => {
+      const disp = combo.length > 24 ? `${combo.slice(0, 23)}…` : combo;
+      thead += `<th class="combo"><div><span title="${esc(combo)}">${i + 1}. ${esc(disp)}</span></div></th>`;
+    });
     thead += '</tr>';
+
+    // Combo key: the full filter set behind each numbered column, with its status.
+    const comboKey = combos
+      .map((c, i) => {
+        const s = combosForReport.find((x) => x.comboLabel === c);
+        const color = s
+          ? s.state === 'broken' && s.leakedPlaceholders
+            ? LEAK
+            : (CELL as Record<string, string>)[s.state] || '#d1d5db'
+          : '#d1d5db';
+        return `<li><span class="dot" style="background:${color};width:10px;height:10px"></span> <b>${i + 1}.</b> ${esc(c)}</li>`;
+      })
+      .join('');
 
     // Combo-status row: one dot per combo (its roll-up state from the summary),
     // so report-level breakage (e.g. leaked placeholders) shows red in the grid
@@ -235,6 +248,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
               : ''
           }${rst.length > 0 ? ` · <span class="chip std">☰ ${rst.length} standards</span>` : ''}</p>
         <div class="tablewrap"><table>${thead}${tbody}</table></div>
+        <ol class="combo-key">${comboKey}</ol>
         ${brokenHtml}
       </section>`);
   }
@@ -274,9 +288,12 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   th.combo{height:150px;padding:0;border:none;background:transparent;white-space:nowrap}
   th.combo>div{width:30px;transform:translate(22px,55px) rotate(315deg)}
   th.combo>div>span{border-bottom:1px solid #bbb;padding:5px 10px;font-weight:600;font-size:11px;color:#111}
-  /* Frozen label columns (stay put during horizontal scroll). */
-  th.sech,th.comph{position:sticky;background:#f9fafb;vertical-align:bottom;font-weight:700;z-index:2}
-  th.sech{left:0} th.comph{left:150px}
+  /* Header label cells: transparent and unpositioned so they never paint over
+     the diagonal combo labels; the DATA label columns below stay frozen. */
+  th.sech,th.comph{background:transparent;vertical-align:bottom;font-weight:700}
+  .combo-key{font-size:12px;list-style:none;margin:8px 0 4px;padding:0;columns:2;max-width:1100px}
+  .combo-key li{margin:2px 0;break-inside:avoid}
+  .combo-key .dot{display:inline-block;border-radius:2px;vertical-align:-1px}
   td.sec,td.comp{position:sticky;background:#fff;z-index:1}
   td.sec{left:0;color:#6b7280;font-weight:600;max-width:150px;overflow:hidden;text-overflow:ellipsis}
   td.comp{left:150px;max-width:340px;overflow:hidden;text-overflow:ellipsis}

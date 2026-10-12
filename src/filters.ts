@@ -156,7 +156,9 @@ export function buildMatrix(filters: FilterWithValues[]): FilterCombo[] {
       for (const p of f.def.parentParams ?? []) {
         if (firstVal[p]) params[p] = firstVal[p];
       }
-      combos.push({ label: `${f.def.paramName}=${v}`, varies: f.def.paramName, params });
+      // Label carries the FULL applied set (cascade parents included), not just
+      // the varied filter — the column should say exactly what ran.
+      combos.push({ label: describe(params), varies: f.def.paramName, params });
     }
   }
 
