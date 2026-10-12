@@ -69,16 +69,27 @@ export interface ComponentResultRow {
   error: string;
 }
 
-/** One row in the downloads output (per report × download control, baseline combo). */
+/**
+ * One row in the downloads output: per component × download control clicked, or
+ * one row for a component with no download button ('missing') / not checkable ('na').
+ */
 export interface DownloadResultRow {
   timestamp: string;
   reportId: string;
-  kind: 'csv' | 'png';
+  kind: 'csv' | 'png' | '';
   label: string;
   ok: boolean;
   filename: string;
   bytes: number;
+  /** Failure message, or the reason a component is 'missing' / 'na'. */
   error: string;
+  /** Absent on runs before per-component download checks (then: ok/failed only). */
+  state?: 'ok' | 'failed' | 'missing' | 'na';
+  section?: string;
+  component?: string;
+  type?: string;
+  sectionIndex?: number;
+  componentIndex?: number;
 }
 
 /** One row in the feedback output (per report, baseline combo; see src/feedback.ts). */

@@ -97,6 +97,7 @@ Env tweaks (prefix any `npm test`):
 RENDER_TIMEOUT_MS=90000 npm test   # give heavy reports more time to load (default 60s)
 MATRIX_MODE=deep npm test          # exhaustive filter combinations (default: one-at-a-time)
 FEEDBACK_MISSING_FAILS=1 npm test  # fail a report when any component lacks its Feedback button
+DOWNLOAD_MISSING_FAILS=1 npm test  # fail a report when any component lacks a download button
 NAV_TIMEOUT_MS=60000 npm test      # give the report PAGE longer to arrive before the one retry (default 45s)
 ```
 While it runs, each filter combination prints a progress line, e.g.
@@ -128,13 +129,14 @@ Once per report (on the baseline combo) it also checks:
 
 | Check | What it does | Fails the test? |
 |-------|--------------|-----------------|
-| ⬇ **Downloads** | clicks every table CSV / chart PNG download control; each must produce a non-empty file | yes, if a download fails |
+| ⬇ **Downloads** | **availability:** every component should have a download button — one without is reported **missing** (amber, with the reason). **Function:** each button found is clicked inside its own component and must produce a non-empty file (table CSV / chart PNG) | yes, if a download fails; a *missing* button only fails with `DOWNLOAD_MISSING_FAILS=1` |
 | 💬 **Feedback** | every component should carry a Feedback button (found without opening anything). Then the form is opened **once per scope** (report header, a section, a visual) through the real button: it must show the right scope (Report / Section / Visual), prefill the reporter, have the required fields and an enabled Submit, load "Previous feedback", and close. **The form is never submitted.** | yes, if the form misbehaves; a *missing* button is reported (amber) but only fails with `FEEDBACK_MISSING_FAILS=1` |
 | ☰ **Standards** | house-style warnings, e.g. bar/line charts without labelled axes | no — warnings only |
 
-Known app gaps the feedback check will report as missing: `text`, `kpi` and `cards`
-components never render a Feedback button, and a component that failed to load shows
-an error card without one (reported as "–", not checkable).
+Known app gaps these checks report as missing: `text`, `kpi` and `cards` components
+never render a Feedback button; `infobox`, `text`, `kpi`, `cards`, `choropleth` and `map`
+components never get a download button. A component that failed to load shows an
+error card with neither (reported as "–", not checkable).
 
 ## The filter matrix
 

@@ -6,6 +6,7 @@ import { discoverFilters, buildMatrix } from '../src/filters';
 import { attachTokenCapture, waitForToken } from '../src/auth-capture';
 import { classifyReport } from '../src/classify';
 import { componentStatesFromReport, fetchReportJson, type ComponentRow } from '../src/components';
+import { scanControls, type ControlsScan } from '../src/controls-scan';
 import { checkDownloads, type DownloadCheck } from '../src/downloads';
 import { checkFeedback, type FeedbackCheck } from '../src/feedback';
 import { gotoWithRetry, within } from '../src/resilience';
@@ -321,27 +322,53 @@ for (const report of reports) {
           });
         }
 
-        // Every component's download control must produce a non-empty file.
+        // One read-only pass mapping each component's header controls (Feedback,
+        // downloads) to that exact component; shared by both checks below.
+        let scan: ControlsScan | undefined;
+        let scanError = '';
+        try {
+          scan = await scanControls(page);
+        } catch (e) {
+          scanError = firstLine(e);
+        }
+
+        // Downloads: does each component HAVE a download button, and does each
+        // button found produce a real, non-empty file?
         let checks: DownloadCheck[];
         try {
-          checks = await checkDownloads(page);
+          if (!scan) throw new Error(scanError);
+          checks = await checkDownloads(page, comps, scan);
         } catch (e) {
           checks = [
-            { kind: 'csv', label: 'download check', ok: false, filename: '', bytes: 0, error: `could not run: ${firstLine(e)}` },
+            {
+              kind: '',
+              label: 'download check',
+              ok: false,
+              filename: '',
+              bytes: 0,
+              error: `download check could not run: ${firstLine(e)}`,
+              state: 'failed',
+              section: '',
+              component: '',
+              type: '',
+            },
           ];
         }
-        const failedDls: string[] = [];
+        const dlProblems: string[] = [];
         for (const chk of checks) {
           appendDownloadResult({ timestamp: new Date().toISOString(), reportId: report.id, ...chk });
-          if (!chk.ok) failedDls.push(`${chk.label} — ${chk.error}`);
+          if (chk.state === 'failed') dlProblems.push(`${chk.label} — ${chk.error}`);
+          else if (chk.state === 'missing' && config.downloadMissingFails)
+            dlProblems.push(`no download button on "${chk.component}" — ${chk.error}`);
         }
-        if (failedDls.length > 0) brokenCombos.push(`[downloads] ${failedDls.join('; ')}`);
+        if (dlProblems.length > 0) brokenCombos.push(`[downloads] ${dlProblems.join('; ')}`);
 
         // Feedback: every visual should carry its button; the form must open,
         // show its scope, load "Previous feedback" and close. NEVER submitted.
         let fbChecks: FeedbackCheck[];
         try {
-          fbChecks = await checkFeedback(page, comps);
+          if (!scan) throw new Error(scanError);
+          fbChecks = await checkFeedback(page, comps, scan);
         } catch (e) {
           fbChecks = [
             {

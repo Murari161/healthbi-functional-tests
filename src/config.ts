@@ -63,6 +63,14 @@ export const config = {
   feedbackMissingFails: process.env.FEEDBACK_MISSING_FAILS === '1',
 
   /**
+   * Same for download buttons: a component without one is recorded ("missing",
+   * amber) but only fails the report with DOWNLOAD_MISSING_FAILS=1 — infobox,
+   * text, kpi, cards, choropleth and map components never get one in the app
+   * today. A download that is present but FAILS always fails the report.
+   */
+  downloadMissingFails: process.env.DOWNLOAD_MISSING_FAILS === '1',
+
+  /**
    * Max time to wait for a report to finish rendering before classifying. Must
    * exceed the app's own limits: the 30s per-component SQL timeout (shared
    * across the report) and the 45s frontend hard-abort. Default 60s; override

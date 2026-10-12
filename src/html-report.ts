@@ -125,13 +125,36 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     const comboRef = (c: string): string =>
       `<code class="cref" title="${esc(fullText(c))}">Combo ${comboNo.get(c) ?? '?'}</code>`;
 
-    // Download status per component (downloads run once per report, on baseline).
+    // Download status per component (checked once per report). Current runs record
+    // one row per component (exact positional key); older runs only recorded the
+    // controls clicked, matched to components by filename below.
     const rdl = dls.filter((d) => d.reportId === reportId);
-    const rdlFailed = rdl.filter((d) => !d.ok);
+    const rdlClicked = rdl.filter((d) => !d.state || d.state === 'ok' || d.state === 'failed');
+    const rdlFailed = rdl.filter((d) => (d.state ? d.state === 'failed' : !d.ok));
+    const rdlMissing = rdl.filter((d) => d.state === 'missing');
+    const dlPerComponent = rdl.some((d) => d.sectionIndex != null);
+    const dlByKey = new Map<string, DownloadResultRow[]>();
+    for (const d of rdl) {
+      if (d.sectionIndex == null || d.componentIndex == null) continue;
+      const k = `i${d.sectionIndex}.${d.componentIndex}`;
+      if (!dlByKey.has(k)) dlByKey.set(k, []);
+      dlByKey.get(k)!.push(d);
+    }
     const normTitle = (t: string) =>
       t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
     const DL_TYPES = ['table', 'table_advanced', 'bar', 'line', 'bar_line', 'pie', 'pyramid', 'waterfall'];
-    const dlStatusFor = (title: string, type: string): { cls: string; text: string; tip: string } => {
+    const dlStatusFor = (key: string, title: string, type: string): { cls: string; text: string; tip: string } => {
+      if (dlPerComponent) {
+        const ds = dlByKey.get(key) ?? [];
+        const bad = ds.filter((d) => d.state === 'failed');
+        const good = ds.filter((d) => d.state === 'ok');
+        const miss = ds.find((d) => d.state === 'missing');
+        if (bad.length) return { cls: 'bad', text: '✗ failed', tip: bad.map((d) => `${d.kind.toUpperCase()}: ${d.error}`).join('; ') };
+        if (good.length)
+          return { cls: 'good', text: '✓ ok', tip: good.map((d) => `${d.kind.toUpperCase()}: ${d.filename} (${d.bytes} bytes)`).join('; ') };
+        if (miss) return { cls: 'warnt', text: 'missing', tip: `no download button — ${miss.error}` };
+        return { cls: 'na', text: '–', tip: ds[0]?.error || 'not checked' };
+      }
       const n = normTitle(title);
       const matches = n ? rdl.filter((d) => (d.label || d.filename).toLowerCase().includes(n)) : [];
       if (matches.length > 0) {
@@ -207,7 +230,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       lastSection = ck.section;
       tbody += `<td class="comp" title="${esc(ck.component)}">${esc(ck.component)}</td>`;
       const firstRow = rows.find((r) => keyOf(r) === ck.key);
-      const dstat = dlStatusFor(ck.component, firstRow?.type || '');
+      const dstat = dlStatusFor(ck.key, ck.component, firstRow?.type || '');
       tbody += `<td class="dlcell ${dstat.cls}" title="${esc(dstat.tip)}">${dstat.text}</td>`;
       if (hasFb) {
         const fstat = fbStatusFor(ck.key);
@@ -331,15 +354,32 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       brokenHtml += `<h3 class="bk-title std">☰ Standards warnings (${rst.length})</h3><ul class="broken-list std">${items}</ul>`;
     }
 
-    // Failed-download details (statuses per component are in the Downloads column).
+    // Download details (per-component statuses are in the Downloads column):
+    // failed downloads (red), then components with no download button (amber,
+    // grouped by reason).
+    const dlWhere = (d: DownloadResultRow) =>
+      d.component
+        ? `${d.section ? `<span class="bk-sec">${esc(d.section)}</span> ` : ''}<b>${esc(d.component)}</b>${d.type ? ` <span class="bk-sec">(${esc(d.type)})</span>` : ''}`
+        : `<b>${esc(d.label)}</b>`;
     if (rdlFailed.length > 0) {
       const items = rdlFailed
         .map(
           (d2) =>
-            `<li><div class="bk-head"><b>${esc(d2.label)}</b> <span class="bk-sec">(${esc(d2.kind)})</span></div><div class="err">${esc(d2.error || 'download failed')}</div></li>`,
+            `<li><div class="bk-head">${dlWhere(d2)}${d2.kind ? ` <span class="bk-sec">— ${esc(d2.kind.toUpperCase())} download</span>` : ''}</div><div class="err">${esc(d2.error || 'download failed')}</div></li>`,
         )
         .join('');
       brokenHtml += `<h3 class="bk-title">⬇ Failed downloads (${rdlFailed.length})</h3><ul class="broken-list">${items}</ul>`;
+    }
+    if (rdlMissing.length > 0) {
+      const byReason = new Map<string, DownloadResultRow[]>();
+      for (const d of rdlMissing) {
+        if (!byReason.has(d.error)) byReason.set(d.error, []);
+        byReason.get(d.error)!.push(d);
+      }
+      const items = [...byReason.entries()]
+        .map(([reason, ds]) => `<li><div class="err">${esc(reason)}</div><div class="bk-combos">${ds.map(dlWhere).join(' · ')}</div></li>`)
+        .join('');
+      brokenHtml += `<h3 class="bk-title warnt">⬇ Download button missing (${rdlMissing.length})</h3><ul class="broken-list warnt">${items}</ul>`;
     }
 
     // Feedback details: form problems (red), missing buttons grouped by reason
@@ -397,7 +437,9 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
             retriedCombos > 0 ? ` · <span class="chip nl" title="page loaded only on the 2nd try">↻ ${retriedCombos} retried</span>` : ''
           }${
             rdl.length > 0
-              ? ` · <span class="${rdlFailed.length ? 'bad' : 'good'}">⬇ ${rdl.length - rdlFailed.length}/${rdl.length} downloads ok</span>`
+              ? ` · <span class="${rdlFailed.length ? 'bad' : 'good'}">⬇ ${rdlClicked.length - rdlFailed.length}/${rdlClicked.length} downloads ok</span>${
+                  rdlMissing.length ? ` · <span class="warnt">⬇ ${rdlMissing.length} without a download button</span>` : ''
+                }`
               : ''
           }${fbMeta}${rst.length > 0 ? ` · <span class="chip std">☰ ${rst.length} standards</span>` : ''}</p>
         <div class="tablewrap"><table class="grid">${thead}${tbody}</table></div>
@@ -410,6 +452,9 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   for (const c of comps) totals[c.state] = (totals[c.state] ?? 0) + 1;
   const totalBrokenCombos = summary.filter((s) => s.state === 'broken').length;
   const notLoadedCombos = summary.filter((s) => s.pageLoaded === false).length;
+  const dlClickedAll = dls.filter((d) => !d.state || d.state === 'ok' || d.state === 'failed');
+  const dlFailedAll = dls.filter((d) => (d.state ? d.state === 'failed' : !d.ok));
+  const dlMissingAll = dls.filter((d) => d.state === 'missing');
   const retriedAll = summary.filter((s) => s.pageLoaded !== false && (s.navAttempts ?? 1) > 1).length;
   // Leakage: combos where raw {{placeholder}} text reached the page.
   const leakageCombos = summary.filter((s) => s.state === 'broken' && s.leakedPlaceholders).length;
@@ -530,7 +575,8 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     ${leakageCombos > 0 ? `<span class="chip leak">⬤ ${leakageCombos} leakage</span>` : ''}
     ${reportLevelBrokenCombos > 0 ? `<span class="chip warn">⚠ ${reportLevelBrokenCombos} report-level</span>` : ''}
     ${retriedAll > 0 ? `<span class="chip nl" title="page loaded only on the 2nd try">↻ ${retriedAll} retried</span>` : ''}
-    ${dls.length > 0 ? `<span class="chip ${dls.some((d) => !d.ok) ? 'bad' : 'good'}">⬇ ${dls.filter((d) => d.ok).length}/${dls.length} downloads ok</span>` : ''}
+    ${dlClickedAll.length > 0 ? `<span class="chip ${dlFailedAll.length ? 'bad' : 'good'}">⬇ ${dlClickedAll.length - dlFailedAll.length}/${dlClickedAll.length} downloads ok</span>` : ''}
+    ${dlMissingAll.length > 0 ? `<span class="chip warn">⬇ ${dlMissingAll.length} without a download button</span>` : ''}
     ${fbs.length > 0 ? `<span class="chip ${fbModalAllOk < fbModalAll.length ? 'bad' : fbVisualAllOk < fbVisualAll.length ? 'warn' : 'good'}">💬 ${fbVisualAllOk}/${fbVisualAll.length} with Feedback · form ${fbModalAllOk}/${fbModalAll.length} ok</span>` : ''}
     ${sts.length > 0 ? `<span class="chip std">☰ ${sts.length} standards</span>` : ''}
     · <span class="${totalBrokenCombos ? 'bad' : 'good'}">${totalBrokenCombos} of ${summary.length} combos broken</span></p>
@@ -566,9 +612,11 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     }`,
   );
   if (dls.length > 0) {
-    const dlOk = dls.filter((d) => d.ok).length;
+    const dlOk = dlClickedAll.length - dlFailedAll.length;
     console.log(
-      `  ${dlOk === dls.length ? col('32', '⬇') : col('31', '⬇')} ${dlOk}/${dls.length} download(s) ok`,
+      `  ${dlFailedAll.length ? col('31', '⬇') : col('32', '⬇')} ${dlOk}/${dlClickedAll.length} download(s) ok${
+        dlMissingAll.length ? col('33', ` · ${dlMissingAll.length} component(s) without a download button`) : ''
+      }`,
     );
   }
   if (fbs.length > 0) {

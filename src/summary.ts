@@ -33,7 +33,22 @@ function outPaths() {
   };
 }
 
-const DL_HEADER = ['timestamp', 'reportId', 'kind', 'label', 'ok', 'filename', 'bytes', 'error'].join(',');
+const DL_HEADER = [
+  'timestamp',
+  'reportId',
+  'kind',
+  'label',
+  'ok',
+  'filename',
+  'bytes',
+  'error',
+  'state',
+  'section',
+  'component',
+  'type',
+  'sectionIndex',
+  'componentIndex',
+].join(',');
 const ST_HEADER = ['timestamp', 'reportId', 'section', 'component', 'type', 'rule', 'detail'].join(',');
 const FB_HEADER = [
   'timestamp',
@@ -172,7 +187,22 @@ export function appendDownloadResult(row: DownloadResultRow): void {
   const { DL_CSV, DL_JSONL } = outPaths();
   ensureFile(DL_CSV, DL_HEADER + '\n');
   ensureFile(DL_JSONL, '');
-  const line = [row.timestamp, row.reportId, row.kind, row.label, row.ok, row.filename, row.bytes, row.error]
+  const line = [
+    row.timestamp,
+    row.reportId,
+    row.kind,
+    row.label,
+    row.ok,
+    row.filename,
+    row.bytes,
+    row.error,
+    row.state ?? '',
+    row.section ?? '',
+    row.component ?? '',
+    row.type ?? '',
+    row.sectionIndex ?? '',
+    row.componentIndex ?? '',
+  ]
     .map(csvCell)
     .join(',');
   appendFileSync(DL_CSV, line + '\n', 'utf8');

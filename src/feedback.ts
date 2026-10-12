@@ -1,5 +1,16 @@
 import type { Locator, Page } from '@playwright/test';
 import type { ComponentRow } from './components';
+import {
+  LAZY_TYPES,
+  OWNER_COMPONENT,
+  REPORT_FEEDBACK_BTN,
+  SECTIONS,
+  SECTION_FEEDBACK_BTN,
+  VISUAL_FEEDBACK_BTN,
+  scanControls,
+  type ControlsScan,
+  type MappedComponent,
+} from './controls-scan';
 import { within } from './resilience';
 
 /**
@@ -9,12 +20,8 @@ import { within } from './resilience';
  * component header) — all opening one modal (#feedback-modal) whose open fires
  * GET /api/feedback/<id> for the "Previous feedback" list.
  *
- *   1. Presence — every component should carry its feedback button. Verified
- *      without opening anything: each visual button's click handler calls
- *      window.openVisualFeedbackModal(sectionTitle, componentId, componentTitle)
- *      with componentId = "<sectionId>::<componentIndex>", so a temporary
- *      recorder patched over that global captures each button's exact
- *      component index — a precise DOM→component mapping, zero modal churn.
+ *   1. Presence — every component should carry its feedback button, mapped to
+ *      its exact component by the shared controls scan (src/controls-scan.ts).
  *   2. Modal — opened ONCE per scope through the real control (hover, then a
  *      normal click — a covered button fails, as it would for a user): modal
  *      shows, crumbs carry the right scope, the reporter identity is prefilled,
@@ -37,15 +44,7 @@ export interface FeedbackCheck {
   componentIndex?: number;
 }
 
-const SECTIONS = '#sections-container > .section';
-/** Visual-scope feedback buttons (the chart PNG button reuses the class — exclude it). */
-const VISUAL_BTN = '.component-feedback-btn:not(.component-download-btn)';
-const SECTION_BTN = '.section-feedback-btn';
-const REPORT_BTN = '#feedback-btn';
 const MODAL = '#feedback-modal';
-
-/** Types the app renders lazily (a `.chart-placeholder` until scrolled into view). */
-const LAZY_TYPES = new Set(['line', 'bar', 'pie', 'bar_line', 'choropleth', 'pyramid', 'waterfall']);
 
 /** Types whose renderer attaches a feedback button (components.js appendComponentTitleRow / renderTable). */
 const TYPES_WITH_BUTTON = new Set([
@@ -71,71 +70,6 @@ const REQUIRED_FIELDS = [
   'feedback-corrective',
   'feedback-submit',
 ];
-
-interface CapturedButton {
-  sIdx: number; // DOM section order == report JSON section order (app renders every section, in order)
-  cIdx: number; // from componentId "<sectionId>::<idx>" — the JSON component index; -1 if unparseable
-  sectionTitle: string;
-  componentTitle: string;
-}
-
-interface DomScan {
-  buttons: CapturedButton[];
-  sectionButtonCount: number[]; // per rendered section, in DOM order
-  sectionTitleShown: string[]; // the section's on-screen title ('' = untitled; the modal then has no Section crumb)
-  lazyLeft: number[]; // unrendered lazy-chart placeholders per section
-  reportButtonVisible: boolean;
-}
-
-/** Enumerate every feedback control without opening a single modal. */
-async function scanFeedbackControls(page: Page): Promise<DomScan> {
-  const scan = await within(scanPage(page), 20_000, null);
-  if (!scan) throw new Error('page unresponsive — feedback scan timed out (20s)');
-  return scan;
-}
-
-function scanPage(page: Page): Promise<DomScan> {
-  return page.evaluate(
-    ({ sectionsSel, visualSel, sectionSel, reportSel }) => {
-      const w = window as any;
-      const orig = w.openVisualFeedbackModal;
-      const buttons: CapturedButton[] = [];
-      const sectionButtonCount: number[] = [];
-      const sectionTitleShown: string[] = [];
-      const lazyLeft: number[] = [];
-      const box: { v: { sectionTitle: string; componentId: string; componentTitle: string } | null } = { v: null };
-      try {
-        w.openVisualFeedbackModal = (sectionTitle: string, componentId: string, componentTitle: string) => {
-          box.v = { sectionTitle, componentId, componentTitle };
-        };
-        const sections = Array.from(document.querySelectorAll(sectionsSel));
-        sections.forEach((sec, si) => {
-          sectionButtonCount.push(sec.querySelectorAll(sectionSel).length);
-          sectionTitleShown.push((sec.querySelector('.section-header .section-title')?.textContent || '').trim());
-          lazyLeft.push(sec.querySelectorAll('.chart-placeholder').length);
-          for (const b of Array.from(sec.querySelectorAll(visualSel))) {
-            box.v = null;
-            (b as HTMLElement).click(); // handler calls the recorder above; no modal opens
-            const got = box.v as { sectionTitle: string; componentId: string; componentTitle: string } | null;
-            const idx = got ? parseInt(String(got.componentId).split('::').pop() || '', 10) : NaN;
-            buttons.push({
-              sIdx: si,
-              cIdx: Number.isFinite(idx) ? idx : -1,
-              sectionTitle: got ? got.sectionTitle : '',
-              componentTitle: got ? got.componentTitle : '',
-            });
-          }
-        });
-      } finally {
-        w.openVisualFeedbackModal = orig; // ALWAYS restore the real handler
-      }
-      const rb = document.querySelector(reportSel) as HTMLElement | null;
-      const reportButtonVisible = !!rb && rb.style.display !== 'none' && rb.offsetParent !== null;
-      return { buttons, sectionButtonCount, sectionTitleShown, lazyLeft, reportButtonVisible };
-    },
-    { sectionsSel: SECTIONS, visualSel: VISUAL_BTN, sectionSel: SECTION_BTN, reportSel: REPORT_BTN },
-  );
-}
 
 /**
  * Open the modal through `trigger` (hover + normal click, like a user), verify
@@ -220,25 +154,23 @@ function hoverClick(btn: Locator, owner: Locator | null) {
   };
 }
 
-/** The nearest `.component` ancestor of a button (the block whose hover reveals it). */
-const OWNER_COMPONENT = `xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' component ')][1]`;
-
 /**
  * Run the feedback audit on the currently-rendered report page. `comps` is the
- * per-component list from the report JSON (positional sIdx/cIdx).
+ * per-component list from the report JSON (positional sIdx/cIdx); `scan` is the
+ * shared controls scan (taken here if not supplied).
  */
-export async function checkFeedback(page: Page, comps: ComponentRow[]): Promise<FeedbackCheck[]> {
+export async function checkFeedback(page: Page, comps: ComponentRow[], scan?: ControlsScan): Promise<FeedbackCheck[]> {
   const out: FeedbackCheck[] = [];
-  const scan = await scanFeedbackControls(page);
-  const nSections = scan.sectionButtonCount.length;
+  const s = scan ?? (await scanControls(page));
+  const nSections = s.sectionButtonCount.length;
   console.log(
-    `[feedback] buttons: report=${scan.reportButtonVisible ? 1 : 0}, ` +
-      `sections=${scan.sectionButtonCount.filter((n) => n > 0).length}/${nSections}, ` +
-      `visuals=${scan.buttons.length}/${comps.length} components`,
+    `[feedback] buttons: report=${s.reportButtonVisible ? 1 : 0}, ` +
+      `sections=${s.sectionButtonCount.filter((n) => n > 0).length}/${nSections}, ` +
+      `visuals=${s.components.length}/${comps.length} components`,
   );
 
-  const byKey = new Map<string, CapturedButton>();
-  for (const b of scan.buttons) byKey.set(`${b.sIdx}.${b.cIdx}`, b);
+  const byKey = new Map<string, MappedComponent>();
+  for (const m of s.components) byKey.set(`${m.sIdx}.${m.cIdx}`, m);
 
   // Report-level button.
   out.push({
@@ -247,14 +179,14 @@ export async function checkFeedback(page: Page, comps: ComponentRow[]): Promise<
     section: '',
     component: '',
     type: '',
-    state: scan.reportButtonVisible ? 'ok' : 'missing',
-    detail: scan.reportButtonVisible ? '' : 'report header shows no Feedback button',
+    state: s.reportButtonVisible ? 'ok' : 'missing',
+    detail: s.reportButtonVisible ? '' : 'report header shows no Feedback button',
   });
 
   // Section-level buttons (unconditional in the app's section header).
   const sectionTitles = new Map<number, string>();
   for (const c of comps) if (!sectionTitles.has(c.sIdx)) sectionTitles.set(c.sIdx, c.section);
-  scan.sectionButtonCount.forEach((n, si) => {
+  s.sectionButtonCount.forEach((n, si) => {
     out.push({
       check: 'button',
       scope: 'section',
@@ -282,7 +214,7 @@ export async function checkFeedback(page: Page, comps: ComponentRow[]): Promise<
     } else if (c.state === 'broken') {
       state = 'na';
       detail = 'component failed to load — its error card has no Feedback button';
-    } else if (LAZY_TYPES.has(c.type) && (scan.lazyLeft[c.sIdx] ?? 0) > 0) {
+    } else if (LAZY_TYPES.has(c.type) && (s.lazyLeft[c.sIdx] ?? 0) > 0) {
       state = 'na';
       detail = 'chart never rendered (lazy placeholder still showing) — could not check';
     } else if (!TYPES_WITH_BUTTON.has(c.type)) {
@@ -306,8 +238,8 @@ export async function checkFeedback(page: Page, comps: ComponentRow[]): Promise<
   }
 
   // Modal — once per scope, through the real controls.
-  if (scan.reportButtonVisible) {
-    const r = await exerciseModal(page, hoverClick(page.locator(REPORT_BTN), null), { scopeLabel: '', value: '' });
+  if (s.reportButtonVisible) {
+    const r = await exerciseModal(page, hoverClick(page.locator(REPORT_FEEDBACK_BTN), null), { scopeLabel: '', value: '' });
     out.push({
       check: 'modal',
       scope: 'report',
@@ -320,12 +252,12 @@ export async function checkFeedback(page: Page, comps: ComponentRow[]): Promise<
   }
   // Prefer a TITLED section: an untitled one legitimately opens with no Section
   // crumb, so it can't show whether the section scope is carried through.
-  const withBtn = scan.sectionButtonCount.map((_, i) => i).filter((i) => scan.sectionButtonCount[i] > 0);
-  const secIdx = withBtn.find((i) => scan.sectionTitleShown[i]) ?? withBtn[0];
+  const withBtn = s.sectionButtonCount.map((_, i) => i).filter((i) => s.sectionButtonCount[i] > 0);
+  const secIdx = withBtn.find((i) => s.sectionTitleShown[i]) ?? withBtn[0];
   if (secIdx !== undefined) {
-    const shown = scan.sectionTitleShown[secIdx] ?? '';
+    const shown = s.sectionTitleShown[secIdx] ?? '';
     const sec = page.locator(SECTIONS).nth(secIdx);
-    const r = await exerciseModal(page, hoverClick(sec.locator(SECTION_BTN).first(), sec.locator('.section-header')), {
+    const r = await exerciseModal(page, hoverClick(sec.locator(SECTION_FEEDBACK_BTN).first(), sec.locator('.section-header')), {
       scopeLabel: shown ? 'Section' : '',
       value: shown,
     });
@@ -340,10 +272,10 @@ export async function checkFeedback(page: Page, comps: ComponentRow[]): Promise<
       sectionIndex: secIdx,
     });
   }
-  if (scan.buttons.length > 0) {
-    const first = scan.buttons[0];
+  if (s.components.length > 0) {
+    const first = s.components[0];
     const comp = comps.find((c) => c.sIdx === first.sIdx && c.cIdx === first.cIdx);
-    const btn = page.locator(SECTIONS).nth(first.sIdx).locator(VISUAL_BTN).first();
+    const btn = page.locator(SECTIONS).nth(first.sIdx).locator(VISUAL_FEEDBACK_BTN).nth(first.k);
     const r = await exerciseModal(page, hoverClick(btn, btn.locator(OWNER_COMPONENT)), {
       scopeLabel: first.componentTitle ? 'Visual' : '',
       value: first.componentTitle,
