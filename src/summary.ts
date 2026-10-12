@@ -68,7 +68,7 @@ const COMP_HEADER = [
  * restart (e.g. after a heavy report times out), wiping earlier reports' rows.
  */
 export function initSummary(): void {
-  const { dir, CSV, JSONL, COMP_CSV, COMP_JSONL, DL_CSV, DL_JSONL } = outPaths();
+  const { dir, CSV, JSONL, COMP_CSV, COMP_JSONL, DL_CSV, DL_JSONL, ST_CSV, ST_JSONL } = outPaths();
   mkdirSync(dir, { recursive: true });
   writeFileSync(CSV, HEADER + '\n', 'utf8');
   writeFileSync(JSONL, '', 'utf8');
