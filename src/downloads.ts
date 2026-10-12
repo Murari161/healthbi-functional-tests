@@ -11,7 +11,7 @@ export interface DownloadCheck {
   error: string;
 }
 
-const CSV_BTN = '[data-tooltip="Download as CSV"]'; // table CSV export buttons
+const CSV_BTN = '.table-export-btn, [data-tooltip="Download as CSV"]'; // table CSV export buttons
 const PNG_BTN = '.component-download-btn'; // hover-revealed chart image buttons
 
 /**
@@ -27,8 +27,10 @@ export async function checkDownloads(page: Page, maxPerKind = 20): Promise<Downl
     ['png', PNG_BTN],
   ];
   for (const [kind, selector] of kinds) {
-    const buttons = page.locator(`#sections-container ${selector}`);
-    const n = Math.min(await buttons.count().catch(() => 0), maxPerKind);
+    const buttons = page.locator(selector); // page-wide: controls may sit in component headers
+    const found = await buttons.count().catch(() => 0);
+    const n = Math.min(found, maxPerKind);
+    console.log(`[downloads] ${kind}: ${found} control(s) found`);
     for (let i = 0; i < n; i++) {
       const btn = buttons.nth(i);
       const check: DownloadCheck = {
