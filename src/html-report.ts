@@ -112,7 +112,8 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
             ? LEAK
             : (CELL as Record<string, string>)[s.state] || '#d1d5db'
           : '#d1d5db';
-        return `<li><span class="dot" style="background:${color};width:10px;height:10px"></span> <b>${i + 1}.</b> ${esc(c)}</li>`;
+        const full = s?.effective || c; // full filter enumeration (older runs fall back to the label)
+        return `<li title="requested: ${esc(c)}"><span class="dot" style="background:${color};width:10px;height:10px"></span> <b>${i + 1}.</b> ${esc(full)}</li>`;
       })
       .join('');
 
@@ -291,6 +292,10 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   /* Header label cells: transparent and unpositioned so they never paint over
      the diagonal combo labels; the DATA label columns below stay frozen. */
   th.sech,th.comph{background:transparent;vertical-align:bottom;font-weight:700}
+  /* Pin exact widths on the two label columns so the layout width always equals
+     the painted width and they can never cover the first dot columns. */
+  th.sech,td.sec{width:150px;min-width:150px;max-width:150px}
+  th.comph,td.comp{width:340px;min-width:340px;max-width:340px}
   .combo-key{font-size:12px;list-style:none;margin:8px 0 4px;padding:0;columns:2;max-width:1100px}
   .combo-key li{margin:2px 0;break-inside:avoid}
   .combo-key .dot{display:inline-block;border-radius:2px;vertical-align:-1px}

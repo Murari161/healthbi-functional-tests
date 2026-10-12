@@ -95,6 +95,8 @@ export interface ResultRow {
   reportId: string;
   comboLabel: string;
   varies: string;
+  /** The full filter set the request actually ran with (app defaults included). */
+  effective: string;
   state: ComponentState;
   totalComponents: number;
   okCount: number;

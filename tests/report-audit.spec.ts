@@ -155,11 +155,28 @@ for (const report of reports) {
         await errorCards.nth(i).screenshot({ path: cshot }).catch(() => {});
       }
 
+      // Full effective filter set this combo ran with: EVERY declared filter,
+      // valued from the app's own data request (so app-applied defaults show
+      // their real values); '—' = not constrained in this combo.
+      let effQ: URLSearchParams | null = null;
+      try {
+        if (capturedUrl) effQ = new URL(capturedUrl).searchParams;
+      } catch {
+        /* ignore */
+      }
+      const effective = filters
+        .map((f) => {
+          const p = f.def.paramName;
+          return `${p}=${effQ?.get(p) ?? combo.params[p] ?? '—'}`;
+        })
+        .join(' & ');
+
       const ts = new Date().toISOString();
       const row: ResultRow = {
         timestamp: ts,
         reportId: report.id,
         comboLabel: combo.label,
+        effective,
         varies: combo.varies,
         state,
         totalComponents: comps.length,
