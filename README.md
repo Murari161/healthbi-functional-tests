@@ -96,6 +96,7 @@ Env tweaks (prefix any `npm test`):
 ```bash
 RENDER_TIMEOUT_MS=90000 npm test   # give heavy reports more time to load (default 60s)
 MATRIX_MODE=deep npm test          # exhaustive filter combinations (default: one-at-a-time)
+FEEDBACK_MISSING_FAILS=1 npm test  # fail a report when any component lacks its Feedback button
 ```
 
 **Flow tip:** with manual login, prefer `npm run prepare-run` **once**, then `npm test`
@@ -112,6 +113,18 @@ to log in every time.
 
 The faithful principle: we report **what the user actually sees** and only flag
 genuine breakage — we never massage an empty result into a pass.
+
+Once per report (on the baseline combo) it also checks:
+
+| Check | What it does | Fails the test? |
+|-------|--------------|-----------------|
+| ⬇ **Downloads** | clicks every table CSV / chart PNG download control; each must produce a non-empty file | yes, if a download fails |
+| 💬 **Feedback** | every component should carry a Feedback button (found without opening anything). Then the form is opened **once per scope** (report header, a section, a visual) through the real button: it must show the right scope (Report / Section / Visual), prefill the reporter, have the required fields and an enabled Submit, load "Previous feedback", and close. **The form is never submitted.** | yes, if the form misbehaves; a *missing* button is reported (amber) but only fails with `FEEDBACK_MISSING_FAILS=1` |
+| ☰ **Standards** | house-style warnings, e.g. bar/line charts without labelled axes | no — warnings only |
+
+Known app gaps the feedback check will report as missing: `text`, `kpi` and `cards`
+components never render a Feedback button, and a component that failed to load shows
+an error card without one (reported as "–", not checkable).
 
 ## The filter matrix
 
@@ -140,14 +153,21 @@ A fresh folder per run means a new run never clobbers files you still have open
 (e.g. `summary.csv` in Excel). `npm run report:html` targets the most recent run.
 In that folder:
 - **`<run-folder-name>.html`** (e.g. `wash-report-plus1__2026-10-08T….html`) — the
-  **red/green grid**: per report, rows = components
-  (grouped by section), columns = filter combos, cells 🟩 ok / 🟥 broken / ⬜ empty
-  (hover a red cell for the error). Open this first. Regenerate anytime with
-  `npm run report:html`.
+  **red/green grid**: per report, rows = components (grouped by section), columns
+  = numbered filter combinations (**Combo 1…N**), cells 🟩 ok / 🟥 broken / ⬜ empty
+  (hover a red cell for the error; hover a Combo header for its filters). The
+  **Downloads** and **Feedback** columns give each component's ✓ ok / ✗ failed /
+  missing status. Under each grid, the **Combination key** lists every combo with
+  one column per filter — **bold** = set by the test, grey = the app's own
+  default, — = not applied — plus its result. Open this first. Regenerate anytime
+  with `npm run report:html`.
 - **`components.csv`** / `.jsonl` — the per-component drill-down: one row per
   (report, combo, section, component, type, **state**, error).
 - `summary.csv` / `.jsonl` — the combo-level roll-up: one row per (report, combo)
-  with state, component counts, and the titles of broken components.
+  with the full effective filter set, state, component counts, and the titles of
+  broken components.
+- `downloads.csv`, `feedback.csv`, `standards.csv` (+ `.jsonl`) — one row per
+  download control / feedback check / standards warning.
 - `screenshots/<report>__<combo>.png` — full **report** screenshot per combo.
 - `screenshots/components/<report>__<combo>__<component>.png` — a screenshot of
   each **broken component** card.
