@@ -34,7 +34,8 @@ function esc(s: unknown): string {
   );
 }
 
-const CELL = { ok: '#16a34a', empty: '#d1d5db', broken: '#dc2626' } as const;
+/** not_loaded (amber): the report page itself never arrived, even on a retry. */
+const CELL = { ok: '#16a34a', empty: '#d1d5db', broken: '#dc2626', not_loaded: '#f59e0b' } as const;
 /** Leakage: raw {{placeholder}} text reached the user (page works, template didn't). */
 const LEAK = '#9333ea';
 const SEP = '\u0001';
@@ -78,9 +79,11 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   const dls: DownloadResultRow[] = readJsonl(join(dir, 'downloads.jsonl'));
   const sts: StandardsResultRow[] = readJsonl(join(dir, 'standards.jsonl'));
   const fbs: FeedbackResultRow[] = readJsonl(join(dir, 'feedback.jsonl'));
-  if (comps.length === 0) return;
+  if (comps.length === 0 && summary.length === 0) return;
 
+  // Reports in run order; one whose page never loaded may have summary rows only.
   const byReport = new Map<string, ComponentResultRow[]>();
+  for (const s of summary) if (!byReport.has(s.reportId)) byReport.set(s.reportId, []);
   for (const c of comps) {
     if (!byReport.has(c.reportId)) byReport.set(c.reportId, []);
     byReport.get(c.reportId)!.push(c);
@@ -88,7 +91,10 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
 
   const reportSections: string[] = [];
   for (const [reportId, rows] of byReport) {
+    // Columns in run order from the combo roll-ups, so a combo with no component
+    // rows (page never loaded, aborted) still gets its column.
     const combos: string[] = [];
+    for (const s of summary) if (s.reportId === reportId && !combos.includes(s.comboLabel)) combos.push(s.comboLabel);
     for (const r of rows) if (!combos.includes(r.comboLabel)) combos.push(r.comboLabel);
     const comboNo = new Map<string, number>(combos.map((c, i) => [c, i + 1]));
 
@@ -164,7 +170,15 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     let thead = '<thead><tr><th class="sech">Section</th><th class="comph">Component</th><th class="dlh">Downloads</th>';
     if (hasFb) thead += '<th class="fbh">Feedback</th>';
     combos.forEach((c, i) => {
-      thead += `<th class="combo" title="${esc(`Combination ${i + 1}: ${fullText(c)}`)}"><span class="cl">Combo</span><span class="cn">${i + 1}</span></th>`;
+      const s = comboSummary(c);
+      const notLoaded = s?.pageLoaded === false;
+      const retried = !notLoaded && (s?.navAttempts ?? 1) > 1;
+      const note = notLoaded
+        ? ' — page never loaded (tried twice)'
+        : retried
+          ? ' — page loaded only on the 2nd try (the first attempt got no page in time)'
+          : '';
+      thead += `<th class="combo" title="${esc(`Combination ${i + 1}: ${fullText(c)}${note}`)}"><span class="cl">Combo</span><span class="cn">${i + 1}${retried ? '<span class="rt">↻</span>' : ''}</span></th>`;
     });
     thead += '</tr></thead>';
 
@@ -175,9 +189,11 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     for (const combo of combos) {
       const s = comboSummary(combo);
       const color = s
-        ? s.state === 'broken' && s.leakedPlaceholders
-          ? LEAK
-          : (CELL as Record<string, string>)[s.state] || 'transparent'
+        ? s.pageLoaded === false
+          ? CELL.not_loaded
+          : s.state === 'broken' && s.leakedPlaceholders
+            ? LEAK
+            : (CELL as Record<string, string>)[s.state] || 'transparent'
         : 'transparent';
       const title = s && s.state === 'broken' ? ` title="${esc(s.brokenComponents || 'broken')}"` : '';
       tbody += `<td class="cell"${title}><span class="dot" style="background:${color}"></span></td>`;
@@ -201,7 +217,8 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
         const st = stateMap.get(`${ck.key}${SEP}${combo}`) || '';
         const err = errMap.get(`${ck.key}${SEP}${combo}`) || '';
         const color = (CELL as Record<string, string>)[st] || 'transparent';
-        const title = st === 'broken' ? ` title="${esc(err || 'Failed to load data')}"` : '';
+        const title =
+          st === 'broken' || st === 'not_loaded' ? ` title="${esc(err || 'Failed to load data')}"` : '';
         tbody += `<td class="cell"${title}><span class="dot" style="background:${color}"></span></td>`;
       }
       tbody += '</tr>';
@@ -229,18 +246,21 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
         else keyHtml += `<td class="dflt" title="the app's own default — not chosen by the test">${esc(v)}</td>`;
       }
       const st: string = s?.state ?? '';
+      const notLoaded = s?.pageLoaded === false;
       const leak = st === 'broken' && s?.leakedPlaceholders;
-      const color = leak ? LEAK : (CELL as Record<string, string>)[st] || 'transparent';
-      const label = leak ? 'leakage' : st || 'not run';
+      const color = notLoaded ? CELL.not_loaded : leak ? LEAK : (CELL as Record<string, string>)[st] || 'transparent';
+      const label = notLoaded ? 'not loaded — the page never loaded (tried twice)' : leak ? 'leakage' : st || 'not run';
       const nBroken = s ? Math.max(0, s.totalComponents - s.okCount - s.emptyCount) : 0;
-      const counts = s ? `${s.okCount} ok · ${s.emptyCount} empty · ${nBroken} broken` : '';
+      const counts = s && !notLoaded ? `${s.okCount} ok · ${s.emptyCount} empty · ${nBroken} broken` : '';
+      const retried = !notLoaded && (s?.navAttempts ?? 1) > 1 ? ' <span class="rtn">· ↻ loaded on the 2nd try</span>' : '';
       const tip = st === 'broken' ? ` title="${esc(s?.brokenComponents || 'broken')}"` : '';
-      keyHtml += `<td class="cres"${tip}><span class="dot" style="background:${color}"></span> ${esc(label)}${counts ? ` <span class="cnt">(${counts})</span>` : ''}</td></tr>`;
+      keyHtml += `<td class="cres"${tip}><span class="dot" style="background:${color}"></span> ${esc(label)}${counts ? ` <span class="cnt">(${counts})</span>` : ''}${retried}</td></tr>`;
     });
     keyHtml += `</tbody></table><p class="key-note"><b>bold</b> = set by this combination · plain grey = the app's own default (not chosen by the test) · — = filter not applied</p>`;
 
-    const rc: Record<string, number> = { ok: 0, broken: 0, empty: 0 };
+    const rc: Record<string, number> = { ok: 0, broken: 0, empty: 0, not_loaded: 0 };
     for (const r of rows) rc[r.state] = (rc[r.state] ?? 0) + 1;
+    const retriedCombos = combosForReport.filter((s) => s.pageLoaded !== false && (s.navAttempts ?? 1) > 1).length;
 
     // Broken-components detail: group broken cells by component, with the error
     // message(s) and which combos each broke under.
@@ -366,11 +386,15 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       <section class="report">
         <h2>${esc(reportId)}</h2>
         <p class="meta">${combos.length} combos · ${compKeys.length} components ·
-          <span class="good">${rc.ok} ok</span> / <span class="bad">${rc.broken} broken</span> / <span class="muted">${rc.empty} empty</span> cells ·
+          <span class="good">${rc.ok} ok</span> / <span class="bad">${rc.broken} broken</span> / <span class="muted">${rc.empty} empty</span>${
+            rc.not_loaded ? ` / <span class="nl">${rc.not_loaded} not loaded</span>` : ''
+          } cells ·
           <span class="${brokenCombos ? 'bad' : 'good'}">${brokenCombos} broken combo(s)</span>${
             leakedList.length > 0 ? ` · <span class="chip leak">⬤ ${leakedList.length} leakage</span>` : ''
           }${
             comboLevel.length > 0 ? ` · <span class="chip warn">⚠ ${comboLevel.length} report-level</span>` : ''
+          }${
+            retriedCombos > 0 ? ` · <span class="chip nl" title="page loaded only on the 2nd try">↻ ${retriedCombos} retried</span>` : ''
           }${
             rdl.length > 0
               ? ` · <span class="${rdlFailed.length ? 'bad' : 'good'}">⬇ ${rdl.length - rdlFailed.length}/${rdl.length} downloads ok</span>`
@@ -382,9 +406,11 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       </section>`);
   }
 
-  const totals: Record<string, number> = { ok: 0, broken: 0, empty: 0 };
+  const totals: Record<string, number> = { ok: 0, broken: 0, empty: 0, not_loaded: 0 };
   for (const c of comps) totals[c.state] = (totals[c.state] ?? 0) + 1;
   const totalBrokenCombos = summary.filter((s) => s.state === 'broken').length;
+  const notLoadedCombos = summary.filter((s) => s.pageLoaded === false).length;
+  const retriedAll = summary.filter((s) => s.pageLoaded !== false && (s.navAttempts ?? 1) > 1).length;
   // Leakage: combos where raw {{placeholder}} text reached the page.
   const leakageCombos = summary.filter((s) => s.state === 'broken' && s.leakedPlaceholders).length;
   // Report-level: broken combos with no failing component query and no leak
@@ -441,6 +467,9 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   tr.status-row td.comp,tr.status-row td.sec{background:#fafafa;font-size:11px;color:#6b7280;font-weight:600}
   .dot{display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:-2px}
   .good{color:#16a34a;font-weight:600}.bad{color:#dc2626;font-weight:600}.muted{color:#9ca3af;font-weight:600}.warnt{color:#b45309;font-weight:600}
+  .nl{color:#b45309;font-weight:600}
+  .rt{color:#b45309;font-weight:700;font-size:11px;margin-left:1px}
+  .rtn{color:#b45309;font-size:11px;font-weight:600}
   /* Combination key */
   .key-title{font-size:13px;margin:14px 0 6px;color:#111}
   table.ckey{border-collapse:collapse;font-size:12px;margin:0 0 4px}
@@ -463,6 +492,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   .chip.warn{background:#fef3c7;color:#92400e}
   .chip.leak{background:#f3e8ff;color:#6b21a8}
   .chip.std{background:#dbeafe;color:#1e40af}
+  .chip.nl{background:#fef3c7;color:#92400e}
   .bk-title.std{color:#1e40af}
   .broken-list.std>li{border-left-color:#2563eb;background:#eff6ff}
   .broken-list.std .err{color:#1e3a8a}
@@ -487,15 +517,19 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     <span class="dot" style="background:${CELL.broken}"></span>broken
     <span class="dot" style="background:${CELL.empty}"></span>empty
     <span class="dot" style="background:${LEAK}"></span>leakage
+    <span class="dot" style="background:${CELL.not_loaded}"></span>component not loaded (the page never loaded, even on a retry)
     <span class="dot" style="background:#fff;border:1px solid #d1d5db"></span>not checked
+    · <span class="rt">↻</span> = page loaded only on the 2nd try
     · columns are filter combinations (Combo 1…N) — each report's <b>Combination key</b> lists the exact filters
   </p>
   <p class="summary"><b>${comps.length}</b> component checks ·
     <span class="chip good">● ${totals.ok} ok</span>
     <span class="chip bad">● ${totals.broken} broken</span>
     <span class="chip muted">● ${totals.empty} empty</span>
+    ${totals.not_loaded > 0 || notLoadedCombos > 0 ? `<span class="chip nl">● ${totals.not_loaded} not loaded (${notLoadedCombos} combo${notLoadedCombos === 1 ? '' : 's'})</span>` : ''}
     ${leakageCombos > 0 ? `<span class="chip leak">⬤ ${leakageCombos} leakage</span>` : ''}
     ${reportLevelBrokenCombos > 0 ? `<span class="chip warn">⚠ ${reportLevelBrokenCombos} report-level</span>` : ''}
+    ${retriedAll > 0 ? `<span class="chip nl" title="page loaded only on the 2nd try">↻ ${retriedAll} retried</span>` : ''}
     ${dls.length > 0 ? `<span class="chip ${dls.some((d) => !d.ok) ? 'bad' : 'good'}">⬇ ${dls.filter((d) => d.ok).length}/${dls.length} downloads ok</span>` : ''}
     ${fbs.length > 0 ? `<span class="chip ${fbModalAllOk < fbModalAll.length ? 'bad' : fbVisualAllOk < fbVisualAll.length ? 'warn' : 'good'}">💬 ${fbVisualAllOk}/${fbVisualAll.length} with Feedback · form ${fbModalAllOk}/${fbModalAll.length} ok</span>` : ''}
     ${sts.length > 0 ? `<span class="chip std">☰ ${sts.length} standards</span>` : ''}
@@ -518,9 +552,14 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   );
   console.log(
     `  ${col('32', '●')} ${totals.ok} ok   ${col('31', '●')} ${totals.broken} broken   ${col('90', '●')} ${totals.empty} empty${
-      leakageCombos > 0 ? `   ${col('35', '●')} ${leakageCombos} leakage` : ''
-    }`,
+      totals.not_loaded > 0 ? `   ${col('33', '●')} ${totals.not_loaded} not loaded` : ''
+    }${leakageCombos > 0 ? `   ${col('35', '●')} ${leakageCombos} leakage` : ''}`,
   );
+  if (notLoadedCombos > 0 || retriedAll > 0) {
+    console.log(
+      `  ${col('33', '↻')} page load: ${retriedAll} combo(s) loaded only on the 2nd try · ${notLoadedCombos} never loaded`,
+    );
+  }
   console.log(
     `  ${totalBrokenCombos > 0 ? col('31', '✗') : col('32', '✓')} ${totalBrokenCombos} of ${summary.length} combo(s) broken${
       reportLevelBrokenCombos > 0 ? col('33', ` (${reportLevelBrokenCombos} report-level)`) : ''

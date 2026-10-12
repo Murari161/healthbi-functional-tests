@@ -70,6 +70,13 @@ export const config = {
    * timeout box, which the classifier flags as broken.
    */
   renderTimeoutMs: num('RENDER_TIMEOUT_MS', 60_000),
+
+  /**
+   * Max time for the report PAGE itself to arrive (page.goto → domcontentloaded).
+   * A page that misses it gets one retry; if the retry misses too, the combo's
+   * components are recorded as "not loaded" and the run moves on.
+   */
+  navTimeoutMs: num('NAV_TIMEOUT_MS', 45_000),
 };
 
 /**

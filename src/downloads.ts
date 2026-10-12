@@ -1,5 +1,6 @@
 import type { Download, Page } from '@playwright/test';
 import { statSync } from 'node:fs';
+import { within } from './resilience';
 
 /** Result of exercising one per-component download control. */
 export interface DownloadCheck {
@@ -48,11 +49,12 @@ export async function checkDownloads(page: Page, maxPerKind = 20): Promise<Downl
         const dl: Download = await waiting;
         check.filename = dl.suggestedFilename();
         if (check.filename) check.label = check.filename;
-        const failure = await dl.failure();
+        // failure() and path() wait for the transfer to finish — bound them.
+        const failure = await within(dl.failure(), 30_000, 'download did not finish within 30s');
         if (failure) {
           check.error = failure;
         } else {
-          const p = await dl.path();
+          const p = await within(dl.path(), 30_000, null);
           check.bytes = p ? statSync(p).size : 0;
           check.ok = check.bytes > 0;
           if (!check.ok) check.error = 'download completed but the file is empty';

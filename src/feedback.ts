@@ -1,5 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 import type { ComponentRow } from './components';
+import { within } from './resilience';
 
 /**
  * Feedback-feature audit (read-only). The app puts a "Feedback" control at
@@ -88,6 +89,12 @@ interface DomScan {
 
 /** Enumerate every feedback control without opening a single modal. */
 async function scanFeedbackControls(page: Page): Promise<DomScan> {
+  const scan = await within(scanPage(page), 20_000, null);
+  if (!scan) throw new Error('page unresponsive — feedback scan timed out (20s)');
+  return scan;
+}
+
+function scanPage(page: Page): Promise<DomScan> {
   return page.evaluate(
     ({ sectionsSel, visualSel, sectionSel, reportSel }) => {
       const w = window as any;
@@ -156,12 +163,16 @@ async function exerciseModal(
     }
 
     // Reporter identity is prefilled from the login (values deliberately not recorded).
-    const identity = await page
-      .evaluate(() => {
-        const v = (id: string) => ((document.getElementById(id) as HTMLInputElement | null)?.value || '').trim();
-        return !!(v('feedback-name') || v('feedback-email'));
-      })
-      .catch(() => false);
+    const identity = await within(
+      page
+        .evaluate(() => {
+          const v = (id: string) => ((document.getElementById(id) as HTMLInputElement | null)?.value || '').trim();
+          return !!(v('feedback-name') || v('feedback-email'));
+        })
+        .catch(() => false),
+      10_000,
+      false,
+    );
     if (!identity) problems.push('reporter name/email not prefilled — feedback would be anonymous');
 
     for (const id of REQUIRED_FIELDS) {

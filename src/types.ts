@@ -30,8 +30,11 @@ export interface FilterCombo {
   params: Record<string, string>;
 }
 
-/** Load state of a single rendered component. */
-export type ComponentState = 'ok' | 'empty' | 'broken';
+/**
+ * Load state of a single rendered component. 'not_loaded' = the report page
+ * itself never arrived (even after a retry), so the user saw no component at all.
+ */
+export type ComponentState = 'ok' | 'empty' | 'broken' | 'not_loaded';
 
 /** Result of classifying one rendered report page. */
 export interface ReportClassification {
@@ -122,4 +125,8 @@ export interface ResultRow {
   leakedPlaceholders: boolean;
   url: string;
   screenshot: string;
+  /** Page-load attempts: 1 normally, 2 if the first got no page in time. Absent on older runs. */
+  navAttempts?: number;
+  /** False when the page never arrived, even on the retry. Absent on older runs. */
+  pageLoaded?: boolean;
 }

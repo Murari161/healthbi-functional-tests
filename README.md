@@ -97,7 +97,10 @@ Env tweaks (prefix any `npm test`):
 RENDER_TIMEOUT_MS=90000 npm test   # give heavy reports more time to load (default 60s)
 MATRIX_MODE=deep npm test          # exhaustive filter combinations (default: one-at-a-time)
 FEEDBACK_MISSING_FAILS=1 npm test  # fail a report when any component lacks its Feedback button
+NAV_TIMEOUT_MS=60000 npm test      # give the report PAGE longer to arrive before the one retry (default 45s)
 ```
+While it runs, each filter combination prints a progress line, e.g.
+`[3/9] ✓ ok — 9 ok · 1 empty · 0 broken (10.7s)`, so you can always see where it is.
 
 **Flow tip:** with manual login, prefer `npm run prepare-run` **once**, then `npm test`
 as often as you like — it reuses the saved session. Use `npm run qa` only if you want it
@@ -110,9 +113,16 @@ to log in every time.
 | ✅ `ok` | components rendered with data | no |
 | ⚪ `empty` | rendered, but no data for this filter | **no** — a real user-visible state, reported as-is |
 | ❌ `broken` | "Failed to load data" card, leaked `{{placeholder}}`, or never rendered | **yes** |
+| 🟧 `not loaded` | the report **page itself never arrived** — every component in that combo is marked "component not loaded" | **yes** (as a report-level broken combo) |
 
 The faithful principle: we report **what the user actually sees** and only flag
 genuine breakage — we never massage an empty result into a pass.
+
+**Page loads.** If a report page doesn't arrive within 45s (`NAV_TIMEOUT_MS`), it is
+retried **once** — what a user does by pressing refresh — and the combo is marked
+**↻** in the grid so the hiccup stays visible. If the retry fails too, the combo's
+components are recorded as **not loaded** and the run carries on with the remaining
+combos (one bad combo never stops the rest of the report).
 
 Once per report (on the baseline combo) it also checks:
 

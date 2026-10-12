@@ -63,6 +63,8 @@ const HEADER = [
   'leakedPlaceholders',
   'url',
   'screenshot',
+  'navAttempts',
+  'pageLoaded',
 ].join(',');
 
 function csvCell(v: string | number | boolean): string {
@@ -132,6 +134,8 @@ export function appendResult(row: ResultRow): void {
     row.leakedPlaceholders,
     row.url,
     row.screenshot,
+    row.navAttempts ?? '',
+    row.pageLoaded ?? '',
   ]
     .map(csvCell)
     .join(',');

@@ -23,10 +23,12 @@ export default defineConfig({
   use: {
     baseURL: config.baseUrl,
     storageState: config.storageStatePath,
-    screenshot: 'on',
+    // Off: the spec saves its own screenshot per combo. Playwright's automatic
+    // end-of-test screenshot hung for 23 min on a half-loaded page (2026-10-12).
+    screenshot: 'off',
     trace: 'retain-on-failure',
     actionTimeout: 20_000,
-    navigationTimeout: 45_000,
+    navigationTimeout: config.navTimeoutMs,
   },
   projects: [
     {
