@@ -7,11 +7,13 @@ import { attachTokenCapture, waitForToken } from '../src/auth-capture';
 import { classifyReport } from '../src/classify';
 import { componentStatesFromReport, fetchReportJson } from '../src/components';
 import { checkDownloads } from '../src/downloads';
+import { checkFeedback } from '../src/feedback';
 import { standardsFromReport } from '../src/standards';
 import {
   appendResult,
   appendComponentResult,
   appendDownloadResult,
+  appendFeedbackResult,
   appendStandardsResult,
   slug,
 } from '../src/summary';
@@ -86,8 +88,9 @@ for (const report of reports) {
     // report isn't aborted mid-run (each combo may wait up to renderTimeoutMs plus
     // overhead). The test still finishes as soon as the combos do — this is only a
     // ceiling, not a fixed wait.
-    // Extra flat buffer covers the one-off download checks on the baseline combo.
-    test.setTimeout((matrix.length + 2) * (config.renderTimeoutMs + 15_000) + 5 * 60_000);
+    // Extra flat buffer covers the one-off download + feedback checks on the
+    // baseline combo, and the lazy-chart pass on each combo.
+    test.setTimeout((matrix.length + 2) * (config.renderTimeoutMs + 45_000) + 7 * 60_000);
     const brokenCombos: string[] = [];
 
     for (const combo of matrix) {
@@ -241,6 +244,22 @@ for (const report of reports) {
           if (!chk.ok) failedDls.push(`${chk.label} — ${chk.error}`);
         }
         if (failedDls.length > 0) brokenCombos.push(`[downloads] ${failedDls.join('; ')}`);
+
+        // Feedback-control audit: every visual should carry its feedback button,
+        // and the modal must open, show the scoped form, load the previous-
+        // feedback list and close. Read-only — the form is NEVER submitted.
+        if (comps.length > 0) {
+          const fbChecks = await checkFeedback(page, comps);
+          const fbProblems: string[] = [];
+          for (const fb of fbChecks) {
+            appendFeedbackResult({ timestamp: new Date().toISOString(), reportId: report.id, ...fb });
+            const label = `${fb.scope}${fb.component ? ` "${fb.component}"` : fb.section ? ` [${fb.section}]` : ''}`;
+            if (fb.state === 'broken') fbProblems.push(`${label}: ${fb.detail}`);
+            else if (fb.state === 'missing' && config.feedbackMissingFails)
+              fbProblems.push(`${label}: ${fb.detail}`);
+          }
+          if (fbProblems.length > 0) brokenCombos.push(`[feedback] ${fbProblems.join('; ')}`);
+        }
       }
 
       if (state === 'broken') {
@@ -267,6 +286,9 @@ for (const report of reports) {
  * with `.skeleton` placeholders during its single /api/report fetch, then
  * replaces them with real sections (or a "No data" message). Timeout is generous
  * (config.renderTimeoutMs) to exceed the 30s per-component and 45s frontend limits.
+ *
+ * Skeletons inside `.chart-placeholder` don't count: those are lazy charts that
+ * only render once scrolled into view (see triggerLazyComponents), not loading.
  */
 async function waitForReportRender(page: Page): Promise<void> {
   await page
@@ -274,27 +296,47 @@ async function waitForReportRender(page: Page): Promise<void> {
       () => {
         const sc = document.querySelector('#sections-container');
         if (!sc) return false;
-        if (sc.querySelector('.skeleton')) return false; // still loading
+        const loading = Array.from(sc.querySelectorAll('.skeleton')).some((el) => !el.closest('.chart-placeholder'));
+        if (loading) return false;
         const txt = (sc as HTMLElement).innerText || '';
         if (/No data available|No data found/i.test(txt)) return true; // empty, but done
         return sc.children.length > 0; // real content rendered
       },
+      undefined, // arg slot — options must be the THIRD parameter
       { timeout: config.renderTimeoutMs },
     )
     .catch(() => {});
   await page.waitForTimeout(400); // settle async transforms
 }
 
-/** Scroll through the page so lazy-loaded charts/maps actually render. */
+/**
+ * Render every lazy chart, the way a user scrolling down does. The report
+ * scrolls inside .report-container (overflow-y:auto), not the window, so each
+ * `.chart-placeholder` is scrolled into view directly — that's what fires the
+ * app's IntersectionObserver. Without this, below-the-fold charts stay
+ * skeletons: no chart, no Feedback/PNG buttons, skeletons in screenshots.
+ */
 async function triggerLazyComponents(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    const step = Math.max(300, Math.floor(window.innerHeight * 0.8));
-    for (let y = 0; y <= document.body.scrollHeight; y += step) {
-      window.scrollTo(0, y);
-      await sleep(150);
-    }
-    window.scrollTo(0, 0);
-  });
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const left = await page
+      .evaluate(async () => {
+        const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+        const sel = '#sections-container .chart-placeholder';
+        for (const el of Array.from(document.querySelectorAll(sel))) {
+          el.scrollIntoView({ block: 'center' });
+          await sleep(150);
+        }
+        return document.querySelectorAll(sel).length;
+      })
+      .catch(() => 0);
+    if (left === 0) break;
+  }
+  await page
+    .evaluate(() => {
+      document.querySelector('.report-container')?.scrollTo(0, 0);
+      window.scrollTo(0, 0);
+    })
+    .catch(() => {});
   await page.waitForTimeout(800); // let Chart.js/Leaflet finish
 }

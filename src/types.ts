@@ -78,6 +78,23 @@ export interface DownloadResultRow {
   error: string;
 }
 
+/** One row in the feedback output (per report, baseline combo; see src/feedback.ts). */
+export interface FeedbackResultRow {
+  timestamp: string;
+  reportId: string;
+  /** 'button' = control presence; 'modal' = open/verify/close exercise. */
+  check: 'button' | 'modal';
+  scope: 'report' | 'section' | 'visual';
+  section: string;
+  component: string;
+  type: string;
+  /** ok | missing (control absent) | broken (modal exercise failed) | na (error card). */
+  state: 'ok' | 'missing' | 'broken' | 'na';
+  detail: string;
+  sectionIndex?: number;
+  componentIndex?: number;
+}
+
 /** One row in the standards output (design warnings; never fail the test). */
 export interface StandardsResultRow {
   timestamp: string;

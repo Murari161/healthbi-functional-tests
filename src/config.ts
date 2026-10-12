@@ -54,6 +54,15 @@ export const config = {
   scope: process.env.REPORT_SCOPE ?? 'all',
 
   /**
+   * A missing per-component feedback button is recorded (and shown amber in the
+   * grid) but doesn't fail the report by default — text/kpi components don't
+   * render one in the current app, so failing would flag every narrative block.
+   * Set FEEDBACK_MISSING_FAILS=1 to enforce "every component has the button".
+   * Modal breakage (opens wrong / list GET fails / won't close) ALWAYS fails.
+   */
+  feedbackMissingFails: process.env.FEEDBACK_MISSING_FAILS === '1',
+
+  /**
    * Max time to wait for a report to finish rendering before classifying. Must
    * exceed the app's own limits: the 30s per-component SQL timeout (shared
    * across the report) and the 45s frontend hard-abort. Default 60s; override

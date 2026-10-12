@@ -1,7 +1,13 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { runDir } from './config';
-import type { ComponentResultRow, DownloadResultRow, ResultRow, StandardsResultRow } from './types';
+import type {
+  ComponentResultRow,
+  DownloadResultRow,
+  FeedbackResultRow,
+  ResultRow,
+  StandardsResultRow,
+} from './types';
 
 /**
  * Incremental results writer. Each report appends its rows as it finishes, so a
@@ -22,11 +28,26 @@ function outPaths() {
     DL_JSONL: join(dir, 'downloads.jsonl'),
     ST_CSV: join(dir, 'standards.csv'),
     ST_JSONL: join(dir, 'standards.jsonl'),
+    FB_CSV: join(dir, 'feedback.csv'),
+    FB_JSONL: join(dir, 'feedback.jsonl'),
   };
 }
 
 const DL_HEADER = ['timestamp', 'reportId', 'kind', 'label', 'ok', 'filename', 'bytes', 'error'].join(',');
 const ST_HEADER = ['timestamp', 'reportId', 'section', 'component', 'type', 'rule', 'detail'].join(',');
+const FB_HEADER = [
+  'timestamp',
+  'reportId',
+  'check',
+  'scope',
+  'section',
+  'component',
+  'type',
+  'state',
+  'detail',
+  'sectionIndex',
+  'componentIndex',
+].join(',');
 
 const HEADER = [
   'timestamp',
@@ -69,7 +90,8 @@ const COMP_HEADER = [
  * restart (e.g. after a heavy report times out), wiping earlier reports' rows.
  */
 export function initSummary(): void {
-  const { dir, CSV, JSONL, COMP_CSV, COMP_JSONL, DL_CSV, DL_JSONL, ST_CSV, ST_JSONL } = outPaths();
+  const { dir, CSV, JSONL, COMP_CSV, COMP_JSONL, DL_CSV, DL_JSONL, ST_CSV, ST_JSONL, FB_CSV, FB_JSONL } =
+    outPaths();
   mkdirSync(dir, { recursive: true });
   writeFileSync(CSV, HEADER + '\n', 'utf8');
   writeFileSync(JSONL, '', 'utf8');
@@ -79,6 +101,8 @@ export function initSummary(): void {
   writeFileSync(DL_JSONL, '', 'utf8');
   writeFileSync(ST_CSV, ST_HEADER + '\n', 'utf8');
   writeFileSync(ST_JSONL, '', 'utf8');
+  writeFileSync(FB_CSV, FB_HEADER + '\n', 'utf8');
+  writeFileSync(FB_JSONL, '', 'utf8');
 }
 
 /** Create a single file with its header only if missing — never wipes, never touches others. */
@@ -161,6 +185,30 @@ export function appendStandardsResult(row: StandardsResultRow): void {
     .join(',');
   appendFileSync(ST_CSV, line + '\n', 'utf8');
   appendFileSync(ST_JSONL, JSON.stringify(row) + '\n', 'utf8');
+}
+
+/** Append one feedback-check row (append-only; safe across worker restarts). */
+export function appendFeedbackResult(row: FeedbackResultRow): void {
+  const { FB_CSV, FB_JSONL } = outPaths();
+  ensureFile(FB_CSV, FB_HEADER + '\n');
+  ensureFile(FB_JSONL, '');
+  const line = [
+    row.timestamp,
+    row.reportId,
+    row.check,
+    row.scope,
+    row.section,
+    row.component,
+    row.type,
+    row.state,
+    row.detail,
+    row.sectionIndex ?? '',
+    row.componentIndex ?? '',
+  ]
+    .map(csvCell)
+    .join(',');
+  appendFileSync(FB_CSV, line + '\n', 'utf8');
+  appendFileSync(FB_JSONL, JSON.stringify(row) + '\n', 'utf8');
 }
 
 /** Safe filename fragment from a report id + combo label. */
