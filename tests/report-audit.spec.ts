@@ -7,7 +7,14 @@ import { attachTokenCapture, waitForToken } from '../src/auth-capture';
 import { classifyReport } from '../src/classify';
 import { componentStatesFromReport, fetchReportJson } from '../src/components';
 import { checkDownloads } from '../src/downloads';
-import { appendResult, appendComponentResult, appendDownloadResult, slug } from '../src/summary';
+import { standardsFromReport } from '../src/standards';
+import {
+  appendResult,
+  appendComponentResult,
+  appendDownloadResult,
+  appendStandardsResult,
+  slug,
+} from '../src/summary';
 import type { ComponentResultRow, DownloadResultRow, ReportListItem, ResultRow } from '../src/types';
 
 /**
@@ -186,6 +193,20 @@ for (const report of reports) {
       // combo only — the wiring doesn't vary by filter). A control that doesn't
       // produce a non-empty file is a defect and fails the report.
       if (combo.varies === 'baseline') {
+        // Design-standards warnings (e.g. unlabeled chart axes). Warnings only —
+        // recorded and shown, but they never fail the test.
+        for (const iss of rep ? standardsFromReport(rep) : []) {
+          appendStandardsResult({
+            timestamp: new Date().toISOString(),
+            reportId: report.id,
+            section: iss.section,
+            component: iss.component,
+            type: iss.type,
+            rule: iss.rule,
+            detail: iss.detail,
+          });
+        }
+
         const checks = await checkDownloads(page);
         const failedDls: string[] = [];
         for (const chk of checks) {

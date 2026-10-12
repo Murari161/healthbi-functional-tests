@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { runDir } from './config';
-import type { ComponentResultRow, DownloadResultRow } from './types';
+import type { ComponentResultRow, DownloadResultRow, StandardsResultRow } from './types';
 
 /**
  * Generates results/report.html — a red/green grid per report: rows are
@@ -62,6 +62,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   const comps: ComponentResultRow[] = readJsonl(join(dir, 'components.jsonl'));
   const summary = readJsonl(join(dir, 'summary.jsonl'));
   const dls: DownloadResultRow[] = readJsonl(join(dir, 'downloads.jsonl'));
+  const sts: StandardsResultRow[] = readJsonl(join(dir, 'standards.jsonl'));
   if (comps.length === 0) return;
 
   const byReport = new Map<string, ComponentResultRow[]>();
@@ -194,6 +195,18 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       brokenHtml += `<h3 class="bk-title">⚠ Broken combos — report-level (${comboLevel.length})</h3><ul class="broken-list">${items}</ul>`;
     }
 
+    // Standards warnings (house style; never fail the test).
+    const rst = sts.filter((t) => t.reportId === reportId);
+    if (rst.length > 0) {
+      const items = rst
+        .map(
+          (t) =>
+            `<li><div class="bk-head">${t.section ? `<span class="bk-sec">${esc(t.section)}</span> ` : ''}<b>${esc(t.component)}</b> <span class="bk-sec">(${esc(t.type)} · ${esc(t.rule)})</span></div><div class="err">${esc(t.detail)}</div></li>`,
+        )
+        .join('');
+      brokenHtml += `<h3 class="bk-title std">☰ Standards warnings (${rst.length})</h3><ul class="broken-list std">${items}</ul>`;
+    }
+
     // Download checks (run once per report on the baseline combo).
     const rdl = dls.filter((d) => d.reportId === reportId);
     const rdlFailed = rdl.filter((d) => !d.ok);
@@ -220,7 +233,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
             rdl.length > 0
               ? ` · <span class="${rdlFailed.length ? 'bad' : 'good'}">⬇ ${rdl.length - rdlFailed.length}/${rdl.length} downloads ok</span>`
               : ''
-          }</p>
+          }${rst.length > 0 ? ` · <span class="chip std">☰ ${rst.length} standards</span>` : ''}</p>
         <div class="tablewrap"><table>${thead}${tbody}</table></div>
         ${brokenHtml}
       </section>`);
@@ -279,6 +292,10 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   .chip.muted{background:#f3f4f6;color:#6b7280}
   .chip.warn{background:#fef3c7;color:#92400e}
   .chip.leak{background:#f3e8ff;color:#6b21a8}
+  .chip.std{background:#dbeafe;color:#1e40af}
+  .bk-title.std{color:#1e40af}
+  .broken-list.std>li{border-left-color:#2563eb;background:#eff6ff}
+  .broken-list.std .err{color:#1e3a8a}
   .bk-title.leak{color:#6b21a8}
   .broken-list.leak>li{border-left-color:#9333ea;background:#faf5ff}
   .broken-list.leak .err{color:#581c87}
@@ -307,6 +324,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     ${leakageCombos > 0 ? `<span class="chip leak">⬤ ${leakageCombos} leakage</span>` : ''}
     ${reportLevelBrokenCombos > 0 ? `<span class="chip warn">⚠ ${reportLevelBrokenCombos} report-level</span>` : ''}
     ${dls.length > 0 ? `<span class="chip ${dls.some((d) => !d.ok) ? 'bad' : 'good'}">⬇ ${dls.filter((d) => d.ok).length}/${dls.length} downloads ok</span>` : ''}
+    ${sts.length > 0 ? `<span class="chip std">☰ ${sts.length} standards</span>` : ''}
     · <span class="${totalBrokenCombos ? 'bad' : 'good'}">${totalBrokenCombos} of ${summary.length} combos broken</span></p>
   ${reportSections.join('\n')}
 </body></html>`;
@@ -339,5 +357,8 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     console.log(
       `  ${dlOk === dls.length ? col('32', '⬇') : col('31', '⬇')} ${dlOk}/${dls.length} download(s) ok`,
     );
+  }
+  if (sts.length > 0) {
+    console.log(`  ${col('34', '☰')} ${sts.length} standards warning(s)`);
   }
 }

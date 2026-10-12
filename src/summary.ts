@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { runDir } from './config';
-import type { ComponentResultRow, DownloadResultRow, ResultRow } from './types';
+import type { ComponentResultRow, DownloadResultRow, ResultRow, StandardsResultRow } from './types';
 
 /**
  * Incremental results writer. Each report appends its rows as it finishes, so a
@@ -20,10 +20,13 @@ function outPaths() {
     COMP_JSONL: join(dir, 'components.jsonl'),
     DL_CSV: join(dir, 'downloads.csv'),
     DL_JSONL: join(dir, 'downloads.jsonl'),
+    ST_CSV: join(dir, 'standards.csv'),
+    ST_JSONL: join(dir, 'standards.jsonl'),
   };
 }
 
 const DL_HEADER = ['timestamp', 'reportId', 'kind', 'label', 'ok', 'filename', 'bytes', 'error'].join(',');
+const ST_HEADER = ['timestamp', 'reportId', 'section', 'component', 'type', 'rule', 'detail'].join(',');
 
 const HEADER = [
   'timestamp',
@@ -73,6 +76,8 @@ export function initSummary(): void {
   writeFileSync(COMP_JSONL, '', 'utf8');
   writeFileSync(DL_CSV, DL_HEADER + '\n', 'utf8');
   writeFileSync(DL_JSONL, '', 'utf8');
+  writeFileSync(ST_CSV, ST_HEADER + '\n', 'utf8');
+  writeFileSync(ST_JSONL, '', 'utf8');
 }
 
 /** Create a single file with its header only if missing — never wipes, never touches others. */
@@ -142,6 +147,18 @@ export function appendDownloadResult(row: DownloadResultRow): void {
     .join(',');
   appendFileSync(DL_CSV, line + '\n', 'utf8');
   appendFileSync(DL_JSONL, JSON.stringify(row) + '\n', 'utf8');
+}
+
+/** Append one standards-warning row (append-only; safe across worker restarts). */
+export function appendStandardsResult(row: StandardsResultRow): void {
+  const { ST_CSV, ST_JSONL } = outPaths();
+  ensureFile(ST_CSV, ST_HEADER + '\n');
+  ensureFile(ST_JSONL, '');
+  const line = [row.timestamp, row.reportId, row.section, row.component, row.type, row.rule, row.detail]
+    .map(csvCell)
+    .join(',');
+  appendFileSync(ST_CSV, line + '\n', 'utf8');
+  appendFileSync(ST_JSONL, JSON.stringify(row) + '\n', 'utf8');
 }
 
 /** Safe filename fragment from a report id + combo label. */

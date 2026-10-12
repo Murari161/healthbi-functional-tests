@@ -78,6 +78,17 @@ export interface DownloadResultRow {
   error: string;
 }
 
+/** One row in the standards output (design warnings; never fail the test). */
+export interface StandardsResultRow {
+  timestamp: string;
+  reportId: string;
+  section: string;
+  component: string;
+  type: string;
+  rule: string;
+  detail: string;
+}
+
 /** One row in the output summary. */
 export interface ResultRow {
   timestamp: string;
