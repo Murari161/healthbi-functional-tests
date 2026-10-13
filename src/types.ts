@@ -160,4 +160,20 @@ export interface ResultRow {
   navAttempts?: number;
   /** False when the page never arrived, even on the retry. Absent on older runs. */
   pageLoaded?: boolean;
+  /**
+   * Load timing (ms), as the browser saw it: opened → report shown (no loading
+   * placeholders), and its parts — page arrival; app setup (the app's own calls
+   * before it asks for the data: sign-in check, report list, filter lists); the
+   * app's one data request, split into server time (request sent → first byte
+   * back, ≈ the slowest component's query, since the server runs them together)
+   * and download; then drawing. Absent when unknown (page not loaded, older runs).
+   */
+  loadMs?: number;
+  pageMs?: number;
+  setupMs?: number;
+  /** The slowest call during app setup, e.g. "filters/regions 2.2 s". */
+  slowestSetupCall?: string;
+  serverMs?: number;
+  downloadMs?: number;
+  drawMs?: number;
 }

@@ -85,6 +85,13 @@ const HEADER = [
   'screenshot',
   'navAttempts',
   'pageLoaded',
+  'loadMs',
+  'pageMs',
+  'setupMs',
+  'slowestSetupCall',
+  'serverMs',
+  'downloadMs',
+  'drawMs',
 ].join(',');
 
 function csvCell(v: string | number | boolean): string {
@@ -170,6 +177,13 @@ export function appendResult(row: ResultRow): void {
     row.screenshot,
     row.navAttempts ?? '',
     row.pageLoaded ?? '',
+    row.loadMs ?? '',
+    row.pageMs ?? '',
+    row.setupMs ?? '',
+    row.slowestSetupCall ?? '',
+    row.serverMs ?? '',
+    row.downloadMs ?? '',
+    row.drawMs ?? '',
   ]
     .map(csvCell)
     .join(',');

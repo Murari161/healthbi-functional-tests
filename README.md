@@ -99,9 +99,12 @@ MATRIX_MODE=deep npm test          # exhaustive filter combinations (default: on
 FEEDBACK_MISSING_FAILS=1 npm test  # fail a report when any component lacks its Feedback button
 DOWNLOAD_MISSING_FAILS=1 npm test  # fail a report when any component lacks a download button
 NAV_TIMEOUT_MS=60000 npm test      # give the report PAGE longer to arrive before the one retry (default 45s)
+LOAD_SLOW_MS=15000 npm test        # colour load times amber from 15s (default 10s; red from LOAD_VERY_SLOW_MS, default 30s)
 ```
 While it runs, each filter combination prints a progress line, e.g.
-`[3/9] ✓ ok — 9 ok · 1 empty · 0 broken (10.7s)`, so you can always see where it is.
+`[3/9] ✓ ok — 9 ok · 1 empty · 0 broken · shown in 5.5 s (app setup 4.5 s · server 0.3 s) (8.7s)`,
+so you can always see where it is. The last figure is how long the suite spent on
+that combination, checks included.
 
 **Flow tip:** with manual login, prefer `npm run prepare-run` **once**, then `npm test`
 as often as you like — it reuses the saved session. Use `npm run qa` only if you want it
@@ -129,6 +132,23 @@ is not the report, so it is retried and then recorded as not loaded — never ju
 broken. After 3 unreachable combinations in a row, the rest of that report is skipped
 (recorded as not loaded, "skipped"). If the sign-in page appears, the session has
 expired: the run stops and asks you to run `npm run prepare-run`.
+
+**Load time.** Every combination is timed as the user experiences it: from opening the
+report until no loading placeholders are left. The time is split into parts that add up:
+
+| Part | What it is |
+|------|------------|
+| page arrived | the report page itself reaches the browser |
+| app setup | the app's own calls before it asks for the data: sign-in check, report list, report details, filter dropdown lists. The slowest of these is named, e.g. `filters/regions 1.3 s` |
+| server | the app's **one** data request for all components, from sent to the first byte back. The server runs the component queries together, so this is roughly the slowest component's query |
+| download | receiving that data |
+| drawing | the browser drawing the charts and tables |
+
+Shown in the grid as two rows, **load time** and **server time** (hover a cell for the
+breakdown), as a **Load time** column in the combination key, and as a ⏱ line per report.
+Times from 10s are amber and from 30s red (`LOAD_SLOW_MS` / `LOAD_VERY_SLOW_MS`). A slow
+report is reported, never failed. The figures are also in `summary.csv` (`loadMs`,
+`pageMs`, `setupMs`, `slowestSetupCall`, `serverMs`, `downloadMs`, `drawMs`).
 
 Once per report (on the baseline combo) it also checks:
 

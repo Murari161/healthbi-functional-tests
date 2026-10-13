@@ -10,9 +10,10 @@ import { within } from './resilience';
  *
  * Skeletons inside `.chart-placeholder` don't count: those are lazy charts that
  * only render once scrolled into view (see triggerLazyComponents), not loading.
+ * Returns when the report was seen finished (epoch ms), or 0 if it never was.
  */
-export async function waitForReportRender(page: Page): Promise<void> {
-  await page
+export async function waitForReportRender(page: Page): Promise<number> {
+  const shownAt = await page
     .waitForFunction(
       () => {
         if (document.querySelector('#kc-login, #kc-form-login')) return true; // sent to sign-in: stop waiting
@@ -27,8 +28,10 @@ export async function waitForReportRender(page: Page): Promise<void> {
       undefined, // arg slot — options must be the THIRD parameter
       { timeout: config.renderTimeoutMs },
     )
-    .catch(() => {});
+    .then(() => Date.now())
+    .catch(() => 0);
   await page.waitForTimeout(400); // settle async transforms
+  return shownAt;
 }
 
 /**

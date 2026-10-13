@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { runDir } from './config';
+import { config, runDir } from './config';
 import type {
   ComponentResultRow,
   DownloadResultRow,
@@ -45,6 +45,36 @@ const CELL = { ok: '#16a34a', empty: '#d1d5db', broken: '#dc2626', not_loaded: '
 /** Leakage: raw {{placeholder}} text reached the user (page works, template didn't). */
 const LEAK = '#9333ea';
 const SEP = '\u0001';
+
+/** Seconds for a grid cell: one decimal under 10 s. */
+const secs = (ms: number) => (ms / 1000).toFixed(ms < 10_000 ? 1 : 0);
+/** Speed class against the configured thresholds (amber / red; never a failure). */
+const speedCls = (ms: number) => (ms >= config.loadVerySlowMs ? 'slow2' : ms >= config.loadSlowMs ? 'slow1' : 'fast');
+/** "opened → shown 5.8 s: page arrived 0.6 s · app setup 4.4 s (slowest: filters/regions 2.2 s) · server 0.3 s · …" */
+function timingTip(s: {
+  loadMs?: number;
+  pageMs?: number;
+  setupMs?: number;
+  slowestSetupCall?: string;
+  serverMs?: number;
+  downloadMs?: number;
+  drawMs?: number;
+}): string {
+  const part = (label: string, v?: number) => (v == null ? '' : `${label} ${(v / 1000).toFixed(1)} s`);
+  const setup = part('app setup', s.setupMs);
+  const parts = [
+    part('page arrived', s.pageMs),
+    setup && s.slowestSetupCall ? `${setup} (slowest call: ${s.slowestSetupCall})` : setup,
+    part('server', s.serverMs),
+    part('download', s.downloadMs),
+    part('drawing', s.drawMs),
+  ].filter(Boolean);
+  return `opened → shown ${s.loadMs == null ? 'never finished' : `${(s.loadMs / 1000).toFixed(1)} s`}${parts.length ? `: ${parts.join(' · ')}` : ''}`;
+}
+const median = (xs: number[]) => {
+  const a = [...xs].sort((x, y) => x - y);
+  return a.length ? a[Math.floor((a.length - 1) / 2)] : 0;
+};
 
 /**
  * Row identity for the grid: positional (section #, component #) when available,
@@ -249,6 +279,27 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     }
     tbody += '</tr>';
 
+    // Load-time rows, per combo: opened → shown, and the server time of the app's
+    // one data request (≈ its slowest component's query). Hover for the breakdown.
+    if (combosForReport.some((s) => s.loadMs != null || s.serverMs != null)) {
+      const rowsOf: Array<[string, 'loadMs' | 'serverMs']> = [
+        ['— load time (s) —', 'loadMs'],
+        ['— server time (s) —', 'serverMs'],
+      ];
+      for (const [label, key] of rowsOf) {
+        tbody += `<tr class="time-row"><td class="sec"></td><td class="comp">${label}</td><td class="dlcell"></td>${hasFb ? '<td class="fbcell"></td>' : ''}`;
+        for (const combo of combos) {
+          const s = comboSummary(combo);
+          const v: number | undefined = s?.[key];
+          tbody +=
+            v == null
+              ? `<td class="tcell na" title="${s?.pageLoaded === false ? 'not loaded' : 'not measured'}">–</td>`
+              : `<td class="tcell ${speedCls(v)}" title="${esc(timingTip(s))}">${secs(v)}</td>`;
+        }
+        tbody += '</tr>';
+      }
+    }
+
     let lastSection = '';
     for (const ck of compKeys) {
       tbody += '<tr>';
@@ -282,7 +333,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
         if (!filterKeys.includes(k)) filterKeys.push(k);
     let keyHtml = `<h3 class="key-title">Combination key — the filters each Combo column ran with</h3><table class="ckey"><thead><tr><th>Combination</th>${filterKeys
       .map((k) => `<th>${esc(k)}</th>`)
-      .join('')}<th>Result</th></tr></thead><tbody>`;
+      .join('')}<th>Result</th><th>Load time</th></tr></thead><tbody>`;
     combos.forEach((c, i) => {
       const s = comboSummary(c);
       const eff = new Map(parseCombo(s?.effective || ''));
@@ -309,7 +360,11 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       const counts = s && !notLoaded ? `${s.okCount} ok · ${s.emptyCount} empty · ${nBroken} broken` : '';
       const retried = !notLoaded && (s?.navAttempts ?? 1) > 1 ? ' <span class="rtn">· ↻ loaded on the 2nd try</span>' : '';
       const tip = st === 'broken' ? ` title="${esc(s?.brokenComponents || 'broken')}"` : '';
-      keyHtml += `<td class="cres"${tip}><span class="dot" style="background:${color}"></span> ${esc(label)}${counts ? ` <span class="cnt">(${counts})</span>` : ''}${retried}</td></tr>`;
+      const loadCell =
+        s?.loadMs != null
+          ? `<span class="${speedCls(s.loadMs)}">${(s.loadMs / 1000).toFixed(1)} s</span>${s.serverMs != null ? ` <span class="cnt">(server ${(s.serverMs / 1000).toFixed(1)} s)</span>` : ''}`
+          : '–';
+      keyHtml += `<td class="cres"${tip}><span class="dot" style="background:${color}"></span> ${esc(label)}${counts ? ` <span class="cnt">(${counts})</span>` : ''}${retried}</td><td class="ctime"${s?.loadMs != null ? ` title="${esc(timingTip(s))}"` : ''}>${loadCell}</td></tr>`;
     });
     keyHtml += `</tbody></table><p class="key-note"><b>bold</b> = set by this combination · plain grey = the app's own default (not chosen by the test) · — = filter not applied</p>`;
 
@@ -454,6 +509,33 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       ? ` · <span class="${fbModalBroken.length ? 'bad' : fbMissing.length ? 'warnt' : 'good'}">💬 ${fbVisualOk}/${fbVisual.length} components have Feedback · form ${fbModals.length - fbModalBroken.length}/${fbModals.length} ok</span>`
       : '';
 
+    // Load-time summary for this report: fastest / typical / slowest, and where.
+    const timed = combosForReport.filter((s) => s.loadMs != null);
+    const serverTimes = combosForReport.filter((s) => s.serverMs != null).map((s) => s.serverMs as number);
+    let timingMeta = '';
+    if (timed.length > 0) {
+      const byLoad = [...timed].sort((a, b) => a.loadMs - b.loadMs);
+      const slow = byLoad[byLoad.length - 1];
+      const f = (v: number) => `${(v / 1000).toFixed(1)} s`;
+      const setupTimes = combosForReport.filter((s) => s.setupMs != null).map((s) => s.setupMs as number);
+      // The call that was most often the slowest during app setup, e.g. "filters/regions".
+      const setupCallCounts = new Map<string, number>();
+      for (const s of combosForReport) {
+        const name = (s.slowestSetupCall as string | undefined)?.replace(/ [\d.]+ s$/, '');
+        if (name) setupCallCounts.set(name, (setupCallCounts.get(name) ?? 0) + 1);
+      }
+      const usualSlowCall = [...setupCallCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+      timingMeta = `<p class="meta">⏱ Opened → shown: fastest <b>${f(byLoad[0].loadMs)}</b> · typical <b>${f(median(timed.map((s) => s.loadMs)))}</b> · slowest <b class="${speedCls(slow.loadMs)}">${f(slow.loadMs)}</b> under ${comboRef(slow.comboLabel)}${
+        setupTimes.length
+          ? ` · of which app setup typically <b>${f(median(setupTimes))}</b>${usualSlowCall ? ` (slowest call usually <code>${esc(usualSlowCall)}</code>)` : ''}`
+          : ''
+      }${
+        serverTimes.length
+          ? ` · data request (server): typical <b>${f(median(serverTimes))}</b>, slowest <b class="${speedCls(Math.max(...serverTimes))}">${f(Math.max(...serverTimes))}</b>`
+          : ''
+      }</p>`;
+    }
+
     reportSections.push(`
       <section class="report">
         <h2>${esc(reportId)}</h2>
@@ -474,6 +556,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
                 }`
               : ''
           }${fbMeta}${rst.length > 0 ? ` · <span class="chip std">☰ ${rst.length} standards</span>` : ''}</p>
+        ${timingMeta}
         <div class="tablewrap"><table class="grid">${thead}${tbody}</table></div>
         ${keyHtml}
         ${brokenHtml}
@@ -484,6 +567,9 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   for (const c of comps) totals[c.state] = (totals[c.state] ?? 0) + 1;
   const totalBrokenCombos = summary.filter((s) => s.state === 'broken').length;
   const notLoadedCombos = summary.filter((s) => s.pageLoaded === false).length;
+  const allLoads = summary.filter((s) => s.loadMs != null).map((s) => s.loadMs as number);
+  const allServer = summary.filter((s) => s.serverMs != null).map((s) => s.serverMs as number);
+  const slowestRow = summary.filter((s) => s.loadMs != null).sort((a, b) => b.loadMs - a.loadMs)[0];
   const dlClickedAll = dls.filter((d) => !d.state || d.state === 'ok' || d.state === 'failed');
   const dlFailedAll = dls.filter((d) => (d.state ? d.state === 'failed' : !d.ok));
   const dlMissingAll = dls.filter((d) => d.state === 'missing');
@@ -570,6 +656,12 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   .chip.leak{background:#f3e8ff;color:#6b21a8}
   .chip.std{background:#dbeafe;color:#1e40af}
   .chip.nl{background:#fef3c7;color:#92400e}
+  tr.time-row td{background:#fcfcfb}
+  tr.time-row td.comp{font-size:11px;color:#6b7280;font-weight:600}
+  td.tcell{font-size:10px;font-weight:700;text-align:center;padding:3px 0}
+  .fast{color:#15803d}.slow1{color:#b45309}.slow2{color:#b91c1c}
+  td.tcell.slow1{background:#fffbeb}td.tcell.slow2{background:#fef2f2}td.tcell.na{color:#9ca3af;font-weight:400}
+  table.ckey td.ctime{white-space:nowrap}
   .platform{margin:18px 0 8px}
   table.ptable{border-collapse:collapse;font-size:13px;max-width:1300px}
   table.ptable th,table.ptable td{border:1px solid #e5e7eb;padding:7px 12px;text-align:left;vertical-align:top}
@@ -617,6 +709,11 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     ${reportLevelBrokenCombos > 0 ? `<span class="chip warn">⚠ ${reportLevelBrokenCombos} report-level</span>` : ''}
     ${retriedAll > 0 ? `<span class="chip nl" title="page loaded only on the 2nd try">↻ ${retriedAll} retried</span>` : ''}
     ${pfs.length > 0 ? `<span class="chip ${pfPass === pfs.length ? 'good' : 'bad'}">▣ platform ${pfPass}/${pfs.length} pass</span>` : ''}
+    ${
+      allLoads.length > 0
+        ? `<span class="chip ${speedCls(Math.max(...allLoads)) === 'fast' ? 'good' : speedCls(Math.max(...allLoads)) === 'slow1' ? 'warn' : 'bad'}" title="opened → shown; slowest: ${esc(slowestRow?.reportId ?? '')} — ${esc(slowestRow?.effective || slowestRow?.comboLabel || '')}">⏱ load typical ${(median(allLoads) / 1000).toFixed(1)} s · slowest ${(Math.max(...allLoads) / 1000).toFixed(1)} s</span>`
+        : ''
+    }
     ${dlClickedAll.length > 0 ? `<span class="chip ${dlFailedAll.length ? 'bad' : 'good'}">⬇ ${dlClickedAll.length - dlFailedAll.length}/${dlClickedAll.length} downloads ok</span>` : ''}
     ${dlMissingAll.length > 0 ? `<span class="chip warn">⬇ ${dlMissingAll.length} without a download button</span>` : ''}
     ${fbs.length > 0 ? `<span class="chip ${fbModalAllOk < fbModalAll.length ? 'bad' : fbVisualAllOk < fbVisualAll.length ? 'warn' : 'good'}">💬 ${fbVisualAllOk}/${fbVisualAll.length} with Feedback · form ${fbModalAllOk}/${fbModalAll.length} ok</span>` : ''}
@@ -641,6 +738,15 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   );
   if (pfs.length > 0) {
     console.log(`  ${pfPass === pfs.length ? col('32', '▣') : col('31', '▣')} platform: ${pfPass}/${pfs.length} check(s) pass`);
+  }
+  if (allLoads.length > 0) {
+    const worst = Math.max(...allLoads);
+    const c = speedCls(worst) === 'fast' ? '32' : speedCls(worst) === 'slow1' ? '33' : '31';
+    console.log(
+      `  ${col(c, '⏱')} load (opened → shown): typical ${(median(allLoads) / 1000).toFixed(1)} s · slowest ${(worst / 1000).toFixed(1)} s${
+        slowestRow ? ` (${slowestRow.reportId.split('/').pop()} — ${slowestRow.comboLabel})` : ''
+      }${allServer.length ? ` · server: typical ${(median(allServer) / 1000).toFixed(1)} s, slowest ${(Math.max(...allServer) / 1000).toFixed(1)} s` : ''}`,
+    );
   }
   console.log(
     `  ${col('32', '●')} ${totals.ok} ok   ${col('31', '●')} ${totals.broken} broken   ${col('90', '●')} ${totals.empty} empty${

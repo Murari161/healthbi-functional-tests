@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Request } from '@playwright/test';
 import { join } from 'node:path';
 import { config, reportUrl, runDir } from '../src/config';
 import { discoverFilters, buildMatrix } from '../src/filters';
@@ -76,6 +76,15 @@ for (const report of reports) {
 
     // Use the captured response only when its URL carries this combo's filters;
     // otherwise re-fetch (avoids using the filterless metadata call or a stale one).
+    // Timing of the app's API calls as the browser saw them. The data request
+    // (/api/report/<id>?filters) fetches every component in ONE call — the server
+    // runs them together; the calls before it are the app setting itself up
+    // (sign-in check, report list, each filter's dropdown list).
+    const apiCalls: Array<{ url: string; timing: ReturnType<Request['timing']> }> = [];
+    page.on('requestfinished', (req) => {
+      if (req.method() === 'GET' && req.url().includes('/api/')) apiCalls.push({ url: req.url(), timing: req.timing() });
+    });
+
     const capturedMatches = (params: Record<string, string>): boolean => {
       if (!capturedReport) return false;
       const u = decodeURIComponent(capturedUrl);
@@ -196,6 +205,7 @@ for (const report of reports) {
       const url = reportUrl(report.id, combo.params);
       capturedReport = null;
       capturedUrl = '';
+      apiCalls.length = 0;
       const nav = await loadReportPage(page, url, {
         navTimeoutMs: config.navTimeoutMs,
         waitForRender: () => waitForReportRender(page),
@@ -269,6 +279,30 @@ for (const report of reports) {
 
       const ts = new Date().toISOString();
       const effective = effectiveOf(combo, capturedUrl);
+      // Load timing: opened → shown, split into page arrival, the data request
+      // (server time, then download) and drawing. Only from this combo's own
+      // data request (verified by capturedMatches), never a stale one.
+      const t = nav.timing;
+      const dataCall = capturedMatches(combo.params) ? [...apiCalls].reverse().find((c) => c.url === capturedUrl) : undefined;
+      const rt = dataCall?.timing;
+      const ms = (v: number) => Math.max(0, Math.round(v));
+      const shown = t && t.shownAt > 0 ? t.shownAt : 0;
+      // The app's own calls between the page arriving and the data request.
+      const setupCalls =
+        t && rt ? apiCalls.filter((c) => c !== dataCall && c.timing.startTime >= t.arrivedAt - 50 && c.timing.startTime < rt.startTime) : [];
+      const slowestSetup = setupCalls.sort((a, b) => b.timing.responseEnd - a.timing.responseEnd)[0];
+      const timing = {
+        loadMs: t && shown ? ms(shown - t.startedAt) : undefined,
+        pageMs: t ? ms(t.arrivedAt - t.startedAt) : undefined,
+        setupMs: t && rt ? ms(rt.startTime - t.arrivedAt) : undefined,
+        slowestSetupCall:
+          slowestSetup && slowestSetup.timing.responseEnd >= 0
+            ? `${new URL(slowestSetup.url).pathname.split('/api/').pop()} ${(slowestSetup.timing.responseEnd / 1000).toFixed(1)} s`
+            : undefined,
+        serverMs: rt && rt.requestStart >= 0 && rt.responseStart >= 0 ? ms(rt.responseStart - rt.requestStart) : undefined,
+        downloadMs: rt && rt.responseStart >= 0 && rt.responseEnd >= 0 ? ms(rt.responseEnd - rt.responseStart) : undefined,
+        drawMs: shown && rt && rt.responseEnd >= 0 ? ms(shown - (rt.startTime + rt.responseEnd)) : undefined,
+      };
       const row: ResultRow = {
         timestamp: ts,
         reportId: report.id,
@@ -285,6 +319,7 @@ for (const report of reports) {
         screenshot: fullShot,
         navAttempts: nav.attempts,
         pageLoaded: true,
+        ...timing,
       };
       appendResult(row);
       rec.written = true;
@@ -409,7 +444,12 @@ for (const report of reports) {
 
       const icon = state === 'ok' ? '✓' : state === 'empty' ? '○' : '✗';
       const counts = `${okComps.length} ok · ${emptyComps.length} empty · ${brokenComps.length} broken`;
-      return { loaded: true, line: `${icon} ${state} — ${counts}${nav.attempts > 1 ? ' · ↻ loaded on the 2nd try' : ''}` };
+      const sec = (v?: number) => (v == null ? '?' : `${(v / 1000).toFixed(1)} s`);
+      const speed =
+        timing.loadMs == null
+          ? ' · load time unknown (never finished)'
+          : ` · shown in ${sec(timing.loadMs)} (app setup ${sec(timing.setupMs)} · server ${sec(timing.serverMs)})`;
+      return { loaded: true, line: `${icon} ${state} — ${counts}${speed}${nav.attempts > 1 ? ' · ↻ loaded on the 2nd try' : ''}` };
     };
 
     for (const [i, combo] of matrix.entries()) {

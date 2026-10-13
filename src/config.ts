@@ -76,6 +76,10 @@ export const config = {
    * PLATFORM_CHECKS=0 turns them off.
    */
   platformChecks: process.env.PLATFORM_CHECKS !== '0',
+
+  /** Load times at or above these are amber / red in the grid (they never fail the test). */
+  loadSlowMs: num('LOAD_SLOW_MS', 10_000),
+  loadVerySlowMs: num('LOAD_VERY_SLOW_MS', 30_000),
   platformReport: process.env.PLATFORM_REPORT ?? '',
 
   /**

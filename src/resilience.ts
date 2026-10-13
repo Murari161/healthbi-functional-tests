@@ -19,11 +19,27 @@ export class SessionExpiredError extends Error {
   }
 }
 
+/** When the successful attempt was opened, arrived, and showed the finished report (epoch ms). */
+export interface LoadTiming {
+  startedAt: number;
+  arrivedAt: number;
+  /** 0 when the report never finished loading within the render timeout. */
+  shownAt: number;
+}
+
 export interface PageLoad {
   ok: boolean;
   attempts: number;
   /** Why the report page wasn't usable ('' when ok). */
   error: string;
+  timing?: LoadTiming;
+}
+
+interface LoadOpts {
+  navTimeoutMs: number;
+  /** The caller's wait for the report to finish loading; may return when it finished (epoch ms). */
+  waitForRender: () => Promise<number | void>;
+  onRetry?: (why: string) => void;
 }
 
 const LOGIN_FORM = '#kc-login, #kc-form-login';
@@ -37,15 +53,12 @@ const LOGIN_FORM = '#kc-login, #kc-form-login';
  * about:blank. An expired session throws SessionExpiredError.
  * `waitForRender` is the caller's wait for the report to finish loading.
  */
-export async function loadReportPage(
-  page: Page,
-  url: string,
-  opts: { navTimeoutMs: number; waitForRender: () => Promise<void>; onRetry?: (why: string) => void },
-): Promise<PageLoad> {
+export async function loadReportPage(page: Page, url: string, opts: LoadOpts): Promise<PageLoad> {
   let error = '';
   for (let attempt = 1; attempt <= 2; attempt++) {
-    error = await attemptLoad(page, url, opts);
-    if (!error) return { ok: true, attempts: attempt, error: '' };
+    const r = await attemptLoad(page, url, opts);
+    error = r.error;
+    if (!error) return { ok: true, attempts: attempt, error: '', timing: r.timing };
     await page.goto('about:blank', { timeout: 10_000 }).catch(() => {});
     if (attempt === 1) {
       opts.onRetry?.(error);
@@ -55,19 +68,18 @@ export async function loadReportPage(
   return { ok: false, attempts: 2, error };
 }
 
-/** One attempt: '' when the report page arrived and rendered, else why not. */
-async function attemptLoad(
-  page: Page,
-  url: string,
-  opts: { navTimeoutMs: number; waitForRender: () => Promise<void> },
-): Promise<string> {
+/** One attempt: error '' (with its timing) when the report page arrived and rendered, else why not. */
+async function attemptLoad(page: Page, url: string, opts: LoadOpts): Promise<{ error: string; timing?: LoadTiming }> {
+  const fail = (error: string) => ({ error });
   let status = 0;
+  const startedAt = Date.now();
   try {
     const resp = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: opts.navTimeoutMs });
     status = resp?.status() ?? 0;
   } catch (e) {
-    return String(e).split('\n')[0].slice(0, 200);
+    return fail(String(e).split('\n')[0].slice(0, 200));
   }
+  const arrivedAt = Date.now();
   // What arrived: the report app's shell, its service-worker offline page, or the sign-in page?
   const landed = await page
     .waitForFunction(
@@ -84,17 +96,17 @@ async function attemptLoad(
     .then((h) => h.jsonValue() as Promise<string>)
     .catch(() => 'unknown');
   if (landed === 'login') throw new SessionExpiredError();
-  if (landed === 'offline') return `site unreachable: the app showed "You are offline"${status ? ` (HTTP ${status})` : ''}`;
+  if (landed === 'offline') return fail(`site unreachable: the app showed "You are offline"${status ? ` (HTTP ${status})` : ''}`);
   // Neither the report, the offline page nor the sign-in page: e.g. the network
   // dropped mid-load and the page arrived blank. Not the report — don't judge it.
-  if (landed === 'unknown') return 'the page arrived blank (no report, offline page or sign-in page after 30s)';
+  if (landed === 'unknown') return fail('the page arrived blank (no report, offline page or sign-in page after 30s)');
 
-  await opts.waitForRender();
+  const shown = await opts.waitForRender();
   // keycloak-js redirects to sign-in only after the app shell has loaded.
   if (await isSignInPage(page)) throw new SessionExpiredError();
   const offlineBox = await within(page.locator('#sections-container .report-offline-state').count().catch(() => 0), 5_000, 0);
-  if (offlineBox > 0) return 'site unreachable: the report showed "You are offline"';
-  return '';
+  if (offlineBox > 0) return fail('site unreachable: the report showed "You are offline"');
+  return { error: '', timing: { startedAt, arrivedAt, shownAt: typeof shown === 'number' ? shown : Date.now() } };
 }
 
 async function isSignInPage(page: Page): Promise<boolean> {
