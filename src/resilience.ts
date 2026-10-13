@@ -85,6 +85,9 @@ async function attemptLoad(
     .catch(() => 'unknown');
   if (landed === 'login') throw new SessionExpiredError();
   if (landed === 'offline') return `site unreachable: the app showed "You are offline"${status ? ` (HTTP ${status})` : ''}`;
+  // Neither the report, the offline page nor the sign-in page: e.g. the network
+  // dropped mid-load and the page arrived blank. Not the report — don't judge it.
+  if (landed === 'unknown') return 'the page arrived blank (no report, offline page or sign-in page after 30s)';
 
   await opts.waitForRender();
   // keycloak-js redirects to sign-in only after the app shell has loaded.

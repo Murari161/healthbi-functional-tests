@@ -138,6 +138,23 @@ Once per report (on the baseline combo) it also checks:
 | 💬 **Feedback** | every component should carry a Feedback button (found without opening anything). Then the form is opened **once per scope** (report header, a section, a visual) through the real button: it must show the right scope (Report / Section / Visual), prefill the reporter, have the required fields and an enabled Submit, load "Previous feedback", and close. **The form is never submitted.** | yes, if the form misbehaves; a *missing* button is reported (amber) but only fails with `FEEDBACK_MISSING_FAILS=1` |
 | ☰ **Standards** | house-style warnings, e.g. bar/line charts without labelled axes | no — warnings only |
 
+**Platform checks** (same code on every report, so run once per run, before the reports,
+shown as a table at the top of the results page). The report — `PLATFORM_REPORT`, else the
+first report in scope — is opened with **every filter set to one real value**, then:
+
+| Test | Passes when |
+|------|-------------|
+| Share button and menu | the menu opens with Download PDF, Save Offline, Copy Link, Email, WhatsApp |
+| Email | the pre-filled email has the report title, and a link carrying every filter — captured, never sent |
+| WhatsApp | the pre-filled message has the report title and a link carrying every filter — captured, never sent |
+| Save Offline | the option switches to "Remove Offline Copy" and back (this browser only) |
+| Download PDF | the server builds a real, non-empty PDF |
+| Copy Link | the copied link carries every filter |
+| Share button after Copy Link | the Share button keeps its icon after "Copied!" |
+| Shared link opens the same view | the copied link, opened in a new tab, shows the same report with the same filters |
+
+`PLATFORM_CHECKS=0` turns them off.
+
 Known app gaps these checks report as missing: `text`, `kpi` and `cards` components
 never render a Feedback button; `infobox`, `text`, `kpi`, `cards`, `choropleth` and `map`
 components never get a download button. A component that failed to load shows an
@@ -185,6 +202,7 @@ In that folder:
   broken components.
 - `downloads.csv`, `feedback.csv`, `standards.csv` (+ `.jsonl`) — one row per
   download control / feedback check / standards warning.
+- `platform.csv` (+ `.jsonl`) — one row per platform check (test, what was found, pass/fail).
 - `screenshots/<report>__<combo>.png` — full **report** screenshot per combo.
 - `screenshots/components/<report>__<combo>__<component>.png` — a screenshot of
   each **broken component** card.

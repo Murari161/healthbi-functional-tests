@@ -1,7 +1,13 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { runDir } from './config';
-import type { ComponentResultRow, DownloadResultRow, FeedbackResultRow, StandardsResultRow } from './types';
+import type {
+  ComponentResultRow,
+  DownloadResultRow,
+  FeedbackResultRow,
+  PlatformResultRow,
+  StandardsResultRow,
+} from './types';
 
 /**
  * Generates results/<run>/<run>.html — one red/green grid per report: rows are
@@ -79,7 +85,25 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   const dls: DownloadResultRow[] = readJsonl(join(dir, 'downloads.jsonl'));
   const sts: StandardsResultRow[] = readJsonl(join(dir, 'standards.jsonl'));
   const fbs: FeedbackResultRow[] = readJsonl(join(dir, 'feedback.jsonl'));
-  if (comps.length === 0 && summary.length === 0) return;
+  const pfs: PlatformResultRow[] = readJsonl(join(dir, 'platform.jsonl'));
+  if (comps.length === 0 && summary.length === 0 && pfs.length === 0) return;
+
+  // Platform checks (same code on every report, run once): a plain table at the top.
+  const pfIcon = (s: string) => (s === 'pass' ? '✓ pass' : s === 'warn' ? '⚠ warning' : '✗ fail');
+  const pfPass = pfs.filter((p) => p.status === 'pass').length;
+  const platformHtml = pfs.length
+    ? `
+      <section class="platform">
+        <h2>Platform checks</h2>
+        <p class="meta">The same on every report, so checked once per run, on ${esc(pfs[0].setup)}</p>
+        <table class="ptable"><thead><tr><th>Test</th><th>What was found</th><th>Result</th></tr></thead><tbody>${pfs
+          .map(
+            (p) =>
+              `<tr><td class="pt">${esc(p.area)} · ${esc(p.check)}</td><td>${esc(p.found)}</td><td class="pr ${esc(p.status)}">${pfIcon(p.status)}</td></tr>`,
+          )
+          .join('')}</tbody></table>
+      </section>`
+    : '';
 
   // Reports in run order; one whose page never loaded may have summary rows only.
   const byReport = new Map<string, ComponentResultRow[]>();
@@ -546,6 +570,15 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   .chip.leak{background:#f3e8ff;color:#6b21a8}
   .chip.std{background:#dbeafe;color:#1e40af}
   .chip.nl{background:#fef3c7;color:#92400e}
+  .platform{margin:18px 0 8px}
+  table.ptable{border-collapse:collapse;font-size:13px;max-width:1300px}
+  table.ptable th,table.ptable td{border:1px solid #e5e7eb;padding:7px 12px;text-align:left;vertical-align:top}
+  table.ptable th{background:#f9fafb;font-weight:700}
+  table.ptable td.pt{white-space:nowrap;font-weight:600;color:#111}
+  table.ptable td.pr{white-space:nowrap;font-weight:700}
+  td.pr.pass{color:#15803d}
+  td.pr.fail{color:#b91c1c}
+  td.pr.warn{color:#b45309}
   .bk-title.std{color:#1e40af}
   .broken-list.std>li{border-left-color:#2563eb;background:#eff6ff}
   .broken-list.std .err{color:#1e3a8a}
@@ -583,11 +616,13 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     ${leakageCombos > 0 ? `<span class="chip leak">⬤ ${leakageCombos} leakage</span>` : ''}
     ${reportLevelBrokenCombos > 0 ? `<span class="chip warn">⚠ ${reportLevelBrokenCombos} report-level</span>` : ''}
     ${retriedAll > 0 ? `<span class="chip nl" title="page loaded only on the 2nd try">↻ ${retriedAll} retried</span>` : ''}
+    ${pfs.length > 0 ? `<span class="chip ${pfPass === pfs.length ? 'good' : 'bad'}">▣ platform ${pfPass}/${pfs.length} pass</span>` : ''}
     ${dlClickedAll.length > 0 ? `<span class="chip ${dlFailedAll.length ? 'bad' : 'good'}">⬇ ${dlClickedAll.length - dlFailedAll.length}/${dlClickedAll.length} downloads ok</span>` : ''}
     ${dlMissingAll.length > 0 ? `<span class="chip warn">⬇ ${dlMissingAll.length} without a download button</span>` : ''}
     ${fbs.length > 0 ? `<span class="chip ${fbModalAllOk < fbModalAll.length ? 'bad' : fbVisualAllOk < fbVisualAll.length ? 'warn' : 'good'}">💬 ${fbVisualAllOk}/${fbVisualAll.length} with Feedback · form ${fbModalAllOk}/${fbModalAll.length} ok</span>` : ''}
     ${sts.length > 0 ? `<span class="chip std">☰ ${sts.length} standards</span>` : ''}
     · <span class="${totalBrokenCombos ? 'bad' : 'good'}">${totalBrokenCombos} of ${summary.length} combos broken</span></p>
+  ${platformHtml}
   ${reportSections.join('\n')}
 </body></html>`;
 
@@ -604,6 +639,9 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   console.log(
     `${col('1', 'Audit summary')} — ${byReport.size} report(s) · ${summary.length} combos · ${comps.length} component checks`,
   );
+  if (pfs.length > 0) {
+    console.log(`  ${pfPass === pfs.length ? col('32', '▣') : col('31', '▣')} platform: ${pfPass}/${pfs.length} check(s) pass`);
+  }
   console.log(
     `  ${col('32', '●')} ${totals.ok} ok   ${col('31', '●')} ${totals.broken} broken   ${col('90', '●')} ${totals.empty} empty${
       totals.not_loaded > 0 ? `   ${col('33', '●')} ${totals.not_loaded} not loaded` : ''

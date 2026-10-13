@@ -109,6 +109,26 @@ export interface FeedbackResultRow {
   componentIndex?: number;
 }
 
+/** One platform-wide check (same code on every report, so run once per run). */
+export interface PlatformCheck {
+  /** Feature area, e.g. "Share". */
+  area: string;
+  /** What was tested, e.g. "Copy Link". */
+  check: string;
+  /** What was found, in words. */
+  found: string;
+  status: 'pass' | 'fail' | 'warn';
+}
+
+/** One row in the platform output. */
+export interface PlatformResultRow extends PlatformCheck {
+  timestamp: string;
+  /** The report the check ran on. */
+  reportId: string;
+  /** The view it ran on, e.g. "TB Quarterly Report with region=Acholi, year=2027, quarter=1". */
+  setup: string;
+}
+
 /** One row in the standards output (design warnings; never fail the test). */
 export interface StandardsResultRow {
   timestamp: string;

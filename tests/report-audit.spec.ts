@@ -1,5 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
-import { existsSync, readFileSync } from 'node:fs';
+import { test, expect } from '@playwright/test';
 import { join } from 'node:path';
 import { config, reportUrl, runDir } from '../src/config';
 import { discoverFilters, buildMatrix } from '../src/filters';
@@ -9,6 +8,8 @@ import { componentStatesFromReport, fetchReportJson, type ComponentRow } from '.
 import { scanControls, type ControlsScan } from '../src/controls-scan';
 import { checkDownloads, type DownloadCheck } from '../src/downloads';
 import { checkFeedback, type FeedbackCheck } from '../src/feedback';
+import { triggerLazyComponents, waitForReportRender } from '../src/render';
+import { loadReports } from '../src/reports';
 import { loadReportPage, SessionExpiredError, within } from '../src/resilience';
 import { standardsFromReport } from '../src/standards';
 import {
@@ -19,7 +20,7 @@ import {
   appendStandardsResult,
   slug,
 } from '../src/summary';
-import type { FilterCombo, ReportClassification, ReportListItem, ResultRow } from '../src/types';
+import type { FilterCombo, ReportClassification, ResultRow } from '../src/types';
 
 /**
  * Post-deploy functional audit. For every report the normal user can see, apply
@@ -35,19 +36,6 @@ import type { FilterCombo, ReportClassification, ReportListItem, ResultRow } fro
  * after 3 unreachable combos in a row the rest of the report is skipped, and an
  * expired session stops the run with a clear message.
  */
-
-function loadReports(): ReportListItem[] {
-  if (!existsSync(config.reportsCachePath)) {
-    throw new Error(
-      `Missing ${config.reportsCachePath}. Run \`npm run prepare-run\` first ` +
-        `(or just \`npm run qa\`, which runs it for you).`,
-    );
-  }
-  const all: ReportListItem[] = JSON.parse(readFileSync(config.reportsCachePath, 'utf8'));
-  if (config.scope === 'all') return all;
-  const wanted = new Set(config.scope.split(',').map((s) => s.trim()).filter(Boolean));
-  return all.filter((r) => wanted.has(r.id));
-}
 
 const reports = loadReports();
 
@@ -473,71 +461,3 @@ for (const report of reports) {
   });
 }
 
-/**
- * Wait until the report has finished loading: the app fills #sections-container
- * with `.skeleton` placeholders during its single /api/report fetch, then
- * replaces them with real sections (or a "No data" message). Timeout is generous
- * (config.renderTimeoutMs) to exceed the 30s per-component and 45s frontend limits.
- *
- * Skeletons inside `.chart-placeholder` don't count: those are lazy charts that
- * only render once scrolled into view (see triggerLazyComponents), not loading.
- */
-async function waitForReportRender(page: Page): Promise<void> {
-  await page
-    .waitForFunction(
-      () => {
-        if (document.querySelector('#kc-login, #kc-form-login')) return true; // sent to sign-in: stop waiting
-        const sc = document.querySelector('#sections-container');
-        if (!sc) return false;
-        const loading = Array.from(sc.querySelectorAll('.skeleton')).some((el) => !el.closest('.chart-placeholder'));
-        if (loading) return false;
-        const txt = (sc as HTMLElement).innerText || '';
-        if (/No data available|No data found/i.test(txt)) return true; // empty, but done
-        return sc.children.length > 0; // real content rendered
-      },
-      undefined, // arg slot — options must be the THIRD parameter
-      { timeout: config.renderTimeoutMs },
-    )
-    .catch(() => {});
-  await page.waitForTimeout(400); // settle async transforms
-}
-
-/**
- * Render every lazy chart, the way a user scrolling down does. The report
- * scrolls inside .report-container (overflow-y:auto), not the window, so each
- * `.chart-placeholder` is scrolled into view directly — that's what fires the
- * app's IntersectionObserver. Without this, below-the-fold charts stay
- * skeletons: no chart, no Feedback/PNG buttons, skeletons in screenshots.
- */
-async function triggerLazyComponents(page: Page): Promise<void> {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    const left = await within(
-      page
-        .evaluate(async () => {
-          const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-          const sel = '#sections-container .chart-placeholder';
-          for (const el of Array.from(document.querySelectorAll(sel))) {
-            el.scrollIntoView({ block: 'center' });
-            await sleep(150);
-          }
-          return document.querySelectorAll(sel).length;
-        })
-        .catch(() => 0),
-      20_000,
-      -1, // page stopped answering — give up on lazy rendering for this combo
-    );
-    if (left <= 0) break;
-  }
-  await within(
-    page
-      .evaluate(() => {
-        document.querySelector('.report-container')?.scrollTo(0, 0);
-        window.scrollTo(0, 0);
-      })
-      .catch(() => {}),
-    5_000,
-    undefined,
-  );
-  await page.waitForTimeout(800); // let Chart.js/Leaflet finish
-}

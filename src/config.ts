@@ -71,6 +71,14 @@ export const config = {
   downloadMissingFails: process.env.DOWNLOAD_MISSING_FAILS === '1',
 
   /**
+   * Platform checks (e.g. the Share menu) run once per run, before the reports,
+   * on PLATFORM_REPORT if set, else on the first report in scope.
+   * PLATFORM_CHECKS=0 turns them off.
+   */
+  platformChecks: process.env.PLATFORM_CHECKS !== '0',
+  platformReport: process.env.PLATFORM_REPORT ?? '',
+
+  /**
    * Max time to wait for a report to finish rendering before classifying. Must
    * exceed the app's own limits: the 30s per-component SQL timeout (shared
    * across the report) and the 45s frontend hard-abort. Default 60s; override

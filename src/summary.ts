@@ -5,6 +5,7 @@ import type {
   ComponentResultRow,
   DownloadResultRow,
   FeedbackResultRow,
+  PlatformResultRow,
   ResultRow,
   StandardsResultRow,
 } from './types';
@@ -30,8 +31,12 @@ function outPaths() {
     ST_JSONL: join(dir, 'standards.jsonl'),
     FB_CSV: join(dir, 'feedback.csv'),
     FB_JSONL: join(dir, 'feedback.jsonl'),
+    PF_CSV: join(dir, 'platform.csv'),
+    PF_JSONL: join(dir, 'platform.jsonl'),
   };
 }
+
+const PF_HEADER = ['timestamp', 'reportId', 'setup', 'area', 'check', 'status', 'found'].join(',');
 
 const DL_HEADER = [
   'timestamp',
@@ -107,7 +112,7 @@ const COMP_HEADER = [
  * restart (e.g. after a heavy report times out), wiping earlier reports' rows.
  */
 export function initSummary(): void {
-  const { dir, CSV, JSONL, COMP_CSV, COMP_JSONL, DL_CSV, DL_JSONL, ST_CSV, ST_JSONL, FB_CSV, FB_JSONL } =
+  const { dir, CSV, JSONL, COMP_CSV, COMP_JSONL, DL_CSV, DL_JSONL, ST_CSV, ST_JSONL, FB_CSV, FB_JSONL, PF_CSV, PF_JSONL } =
     outPaths();
   mkdirSync(dir, { recursive: true });
   writeFileSync(CSV, HEADER + '\n', 'utf8');
@@ -120,6 +125,20 @@ export function initSummary(): void {
   writeFileSync(ST_JSONL, '', 'utf8');
   writeFileSync(FB_CSV, FB_HEADER + '\n', 'utf8');
   writeFileSync(FB_JSONL, '', 'utf8');
+  writeFileSync(PF_CSV, PF_HEADER + '\n', 'utf8');
+  writeFileSync(PF_JSONL, '', 'utf8');
+}
+
+/** Append one platform-check row (append-only; safe across worker restarts). */
+export function appendPlatformResult(row: PlatformResultRow): void {
+  const { PF_CSV, PF_JSONL } = outPaths();
+  ensureFile(PF_CSV, PF_HEADER + '\n');
+  ensureFile(PF_JSONL, '');
+  const line = [row.timestamp, row.reportId, row.setup, row.area, row.check, row.status, row.found]
+    .map(csvCell)
+    .join(',');
+  appendFileSync(PF_CSV, line + '\n', 'utf8');
+  appendFileSync(PF_JSONL, JSON.stringify(row) + '\n', 'utf8');
 }
 
 /** Create a single file with its header only if missing — never wipes, never touches others. */
