@@ -123,7 +123,12 @@ genuine breakage — we never massage an empty result into a pass.
 retried **once** — what a user does by pressing refresh — and the combo is marked
 **↻** in the grid so the hiccup stays visible. If the retry fails too, the combo's
 components are recorded as **not loaded** and the run carries on with the remaining
-combos (one bad combo never stops the rest of the report).
+combos (one bad combo never stops the rest of the report). The same applies when the
+site is unreachable and the app shows its own "You are offline" page or message: that
+is not the report, so it is retried and then recorded as not loaded — never judged as
+broken. After 3 unreachable combinations in a row, the rest of that report is skipped
+(recorded as not loaded, "skipped"). If the sign-in page appears, the session has
+expired: the run stops and asks you to run `npm run prepare-run`.
 
 Once per report (on the baseline combo) it also checks:
 

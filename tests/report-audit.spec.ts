@@ -9,7 +9,7 @@ import { componentStatesFromReport, fetchReportJson, type ComponentRow } from '.
 import { scanControls, type ControlsScan } from '../src/controls-scan';
 import { checkDownloads, type DownloadCheck } from '../src/downloads';
 import { checkFeedback, type FeedbackCheck } from '../src/feedback';
-import { gotoWithRetry, within } from '../src/resilience';
+import { loadReportPage, SessionExpiredError, within } from '../src/resilience';
 import { standardsFromReport } from '../src/standards';
 import {
   appendResult,
@@ -26,11 +26,14 @@ import type { FilterCombo, ReportClassification, ReportListItem, ResultRow } fro
  * a filter matrix (OFAT + pairwise) through the real UI and record, per combo:
  *   - a combo-level roll-up (summary.csv)
  *   - a per-component state grid (components.csv): each component ok/empty/broken,
- *     or "not loaded" when the report page itself never arrived (even on a retry)
+ *     or "not loaded" when the report page itself never arrived (even on a retry,
+ *     including when the site is unreachable and the app shows "You are offline")
  *   - a full-page screenshot, plus one per broken component
  * Once per report (on the first combo that loads): downloads, feedback, standards.
  * A report test FAILS only on ❌ broken; ⚪ empty is recorded, not failed. A combo
- * that goes wrong is recorded and the run carries on with the remaining combos.
+ * that goes wrong is recorded and the run carries on with the remaining combos;
+ * after 3 unreachable combos in a row the rest of the report is skipped, and an
+ * expired session stops the run with a clear message.
  */
 
 function loadReports(): ReportListItem[] {
@@ -97,9 +100,11 @@ for (const report of reports) {
     // Prime: load the report once so the app authenticates (gives us a token) and
     // so we can read its filter definitions.
     const primeUrl = reportUrl(report.id, {});
-    const prime = await gotoWithRetry(page, primeUrl, config.navTimeoutMs, (err) =>
-      console.log(`[${report.id}] ↻ page didn't load (${err}) — retrying once`),
-    );
+    const prime = await loadReportPage(page, primeUrl, {
+      navTimeoutMs: config.navTimeoutMs,
+      waitForRender: () => waitForReportRender(page),
+      onRetry: (why) => console.log(`[${report.id}] ↻ ${why} — retrying once`),
+    });
     if (!prime.ok) {
       appendResult({
         timestamp: new Date().toISOString(),
@@ -120,7 +125,6 @@ for (const report of reports) {
       });
     }
     expect(prime.ok, `Report page never loaded (2 attempts): ${prime.error}`).toBe(true);
-    await waitForReportRender(page);
     const token = await waitForToken(page, getToken);
     test.skip(!token, 'No auth token captured — session may have expired; re-run `npm run prepare-run`.');
 
@@ -139,6 +143,7 @@ for (const report of reports) {
     // component "not loaded" when a combo's page never arrives.
     let refComps: ComponentRow[] = capturedReport ? componentStatesFromReport(capturedReport) : [];
     let onceChecksDone = false;
+    let notLoadedInARow = 0;
 
     /** Every declared filter, valued from the app's own data request (so app defaults show); '—' = unconstrained. */
     const effectiveOf = (combo: FilterCombo, dataUrl: string): string => {
@@ -156,56 +161,64 @@ for (const report of reports) {
         .join(' & ');
     };
 
-    /** Run one combo, recording its rows; returns the one-line progress summary. */
-    const runCombo = async (combo: FilterCombo, tag: string, rec: { written: boolean }): Promise<string> => {
-      const url = reportUrl(report.id, combo.params);
-      capturedReport = null;
-      capturedUrl = '';
-      const nav = await gotoWithRetry(page, url, config.navTimeoutMs, (err) =>
-        console.log(`${tag} ↻ page didn't load in ${config.navTimeoutMs / 1000}s (${err}) — retrying once`),
-      );
-
-      if (!nav.ok) {
-        // The user would see no report at all: every component is "not loaded".
-        const ts = new Date().toISOString();
-        appendResult({
+    /** The user would see no report at all: every component of the combo is "not loaded". */
+    const recordNotLoaded = (combo: FilterCombo, url: string, reason: string, attempts: number) => {
+      const ts = new Date().toISOString();
+      appendResult({
+        timestamp: ts,
+        reportId: report.id,
+        comboLabel: combo.label,
+        effective: effectiveOf(combo, ''),
+        varies: combo.varies,
+        state: 'broken',
+        totalComponents: refComps.length,
+        okCount: 0,
+        emptyCount: 0,
+        brokenComponents: reason,
+        leakedPlaceholders: false,
+        url,
+        screenshot: '',
+        navAttempts: attempts,
+        pageLoaded: false,
+      });
+      for (const c of refComps) {
+        appendComponentResult({
           timestamp: ts,
           reportId: report.id,
           comboLabel: combo.label,
-          effective: effectiveOf(combo, ''),
           varies: combo.varies,
-          state: 'broken',
-          totalComponents: refComps.length,
-          okCount: 0,
-          emptyCount: 0,
-          brokenComponents: `page never loaded (2 attempts, ${config.navTimeoutMs / 1000}s each): ${nav.error}`,
-          leakedPlaceholders: false,
-          url,
-          screenshot: '',
-          navAttempts: nav.attempts,
-          pageLoaded: false,
+          sectionIndex: c.sIdx,
+          componentIndex: c.cIdx,
+          section: c.section,
+          component: c.title,
+          type: c.type,
+          state: 'not_loaded',
+          error: `component not loaded — ${reason}`,
         });
+      }
+      brokenCombos.push(`[${combo.label}] ${reason}`);
+    };
+
+    /** Run one combo, recording its rows; returns whether the page loaded, plus a progress line. */
+    const runCombo = async (
+      combo: FilterCombo,
+      tag: string,
+      rec: { written: boolean },
+    ): Promise<{ loaded: boolean; line: string }> => {
+      const url = reportUrl(report.id, combo.params);
+      capturedReport = null;
+      capturedUrl = '';
+      const nav = await loadReportPage(page, url, {
+        navTimeoutMs: config.navTimeoutMs,
+        waitForRender: () => waitForReportRender(page),
+        onRetry: (why) => console.log(`${tag} ↻ ${why} — retrying once`),
+      });
+      if (!nav.ok) {
+        recordNotLoaded(combo, url, `page never loaded (2 attempts): ${nav.error}`, nav.attempts);
         rec.written = true;
-        for (const c of refComps) {
-          appendComponentResult({
-            timestamp: ts,
-            reportId: report.id,
-            comboLabel: combo.label,
-            varies: combo.varies,
-            sectionIndex: c.sIdx,
-            componentIndex: c.cIdx,
-            section: c.section,
-            component: c.title,
-            type: c.type,
-            state: 'not_loaded',
-            error: 'component not loaded — the report page never loaded (tried twice)',
-          });
-        }
-        brokenCombos.push(`[${combo.label}] page never loaded (2 attempts) — components not loaded`);
-        return `✗ page never loaded after 2 attempts — ${refComps.length} component(s) marked "not loaded"`;
+        return { loaded: false, line: `✗ not loaded after 2 attempts — ${nav.error}` };
       }
 
-      await waitForReportRender(page);
       await triggerLazyComponents(page); // render lazy charts/maps for the screenshot
 
       // Report-level DOM signals (what the user sees): timeout/error box, leaked {{}}.
@@ -267,11 +280,12 @@ for (const report of reports) {
       }
 
       const ts = new Date().toISOString();
+      const effective = effectiveOf(combo, capturedUrl);
       const row: ResultRow = {
         timestamp: ts,
         reportId: report.id,
         comboLabel: combo.label,
-        effective: effectiveOf(combo, capturedUrl),
+        effective,
         varies: combo.varies,
         state,
         totalComponents: comps.length,
@@ -407,18 +421,26 @@ for (const report of reports) {
 
       const icon = state === 'ok' ? '✓' : state === 'empty' ? '○' : '✗';
       const counts = `${okComps.length} ok · ${emptyComps.length} empty · ${brokenComps.length} broken`;
-      return `${icon} ${state} — ${counts}${nav.attempts > 1 ? ' · ↻ loaded on the 2nd try' : ''}`;
+      return { loaded: true, line: `${icon} ${state} — ${counts}${nav.attempts > 1 ? ' · ↻ loaded on the 2nd try' : ''}` };
     };
 
     for (const [i, combo] of matrix.entries()) {
       const tag = `[${i + 1}/${matrix.length}]`;
+      if (notLoadedInARow >= 3) {
+        // The site is down: don't spend ~2 minutes per combo proving it again.
+        recordNotLoaded(combo, reportUrl(report.id, combo.params), 'skipped: the site was unreachable for 3 combinations in a row', 0);
+        console.log(`${tag} ⏭ ${combo.label} — skipped, site unreachable for 3 combinations in a row`);
+        continue;
+      }
       const t0 = Date.now();
       const rec = { written: false };
       console.log(`${tag} ▶ ${combo.label}`);
       let line: string;
+      let loaded = true;
       try {
-        line = await runCombo(combo, tag, rec);
+        ({ line, loaded } = await runCombo(combo, tag, rec));
       } catch (e) {
+        if (e instanceof SessionExpiredError) throw e; // nothing after this can be judged
         // Anything unexpected: record THIS combo as broken and carry on with the rest.
         const msg = firstLine(e);
         if (!rec.written) {
@@ -442,6 +464,7 @@ for (const report of reports) {
         line = `✗ aborted — ${msg}`;
         await page.goto('about:blank', { timeout: 10_000 }).catch(() => {});
       }
+      notLoadedInARow = loaded ? 0 : notLoadedInARow + 1;
       console.log(`${tag} ${line} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
     }
 
@@ -463,6 +486,7 @@ async function waitForReportRender(page: Page): Promise<void> {
   await page
     .waitForFunction(
       () => {
+        if (document.querySelector('#kc-login, #kc-form-login')) return true; // sent to sign-in: stop waiting
         const sc = document.querySelector('#sections-container');
         if (!sc) return false;
         const loading = Array.from(sc.querySelectorAll('.skeleton')).some((el) => !el.closest('.chart-placeholder'));
