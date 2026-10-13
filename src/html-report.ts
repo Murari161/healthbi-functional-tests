@@ -197,7 +197,9 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       const notLoaded = s?.pageLoaded === false;
       const retried = !notLoaded && (s?.navAttempts ?? 1) > 1;
       const note = notLoaded
-        ? ' — page never loaded (tried twice)'
+        ? s?.navAttempts === 0
+          ? ' — skipped: the site was unreachable for the combinations before it'
+          : ' — page never loaded (tried twice)'
         : retried
           ? ' — page loaded only on the 2nd try (the first attempt got no page in time)'
           : '';
@@ -272,7 +274,13 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       const notLoaded = s?.pageLoaded === false;
       const leak = st === 'broken' && s?.leakedPlaceholders;
       const color = notLoaded ? CELL.not_loaded : leak ? LEAK : (CELL as Record<string, string>)[st] || 'transparent';
-      const label = notLoaded ? 'not loaded — the page never loaded (tried twice)' : leak ? 'leakage' : st || 'not run';
+      const label = notLoaded
+        ? s?.navAttempts === 0
+          ? 'not loaded — skipped, the site was unreachable'
+          : 'not loaded — the page never loaded (tried twice)'
+        : leak
+          ? 'leakage'
+          : st || 'not run';
       const nBroken = s ? Math.max(0, s.totalComponents - s.okCount - s.emptyCount) : 0;
       const counts = s && !notLoaded ? `${s.okCount} ok · ${s.emptyCount} empty · ${nBroken} broken` : '';
       const retried = !notLoaded && (s?.navAttempts ?? 1) > 1 ? ' <span class="rtn">· ↻ loaded on the 2nd try</span>' : '';
