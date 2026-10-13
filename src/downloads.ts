@@ -8,6 +8,8 @@ import {
   PNG_BTN,
   SECTIONS,
   VISUAL_FEEDBACK_BTN,
+  compKey,
+  matchComponents,
   type ControlsScan,
 } from './controls-scan';
 import { within } from './resilience';
@@ -85,7 +87,7 @@ export async function checkDownloads(
   maxClicks = 60,
 ): Promise<DownloadCheck[]> {
   const out: DownloadCheck[] = [];
-  const byKey = new Map(scan.components.map((m) => [`${m.sIdx}.${m.cIdx}`, m] as const));
+  const matched = matchComponents(comps, scan);
   const nSections = scan.sectionButtonCount.length;
   let clicks = 0;
 
@@ -93,7 +95,7 @@ export async function checkDownloads(
     const base = { section: c.section, component: c.title, type: c.type, sectionIndex: c.sIdx, componentIndex: c.cIdx };
     const note = (state: 'missing' | 'na', reason: string) =>
       out.push({ ...base, kind: '', label: c.title, ok: false, filename: '', bytes: 0, error: reason, state });
-    const m = byKey.get(`${c.sIdx}.${c.cIdx}`);
+    const m = matched.get(compKey(c));
 
     if (nSections === 0) {
       note('na', 'report showed "No data available" — no components on screen to check');
@@ -128,6 +130,10 @@ export async function checkDownloads(
         }
         clicks++;
         const r = await clickAndVerify(page, block.locator(sel).first());
+        // The app keeps a chart's image button even when it drew "No data available"
+        // instead of a chart; clicking it then does nothing. Say so plainly.
+        if (!r.ok && kind === 'png' && c.state === 'empty' && !r.filename)
+          r.error = 'button shown on an empty chart ("No data available"): clicking it does nothing';
         out.push({ ...base, kind, label: r.filename || c.title, ...r, state: r.ok ? 'ok' : 'failed' });
       }
     }

@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import type { ComponentRow } from './components';
 import { within } from './resilience';
 
 /**
@@ -7,11 +8,16 @@ import { within } from './resilience';
  * component they belong to. Shared by the feedback and download checks.
  *
  * Mapping trick: each visual Feedback button's click handler calls
- * window.openVisualFeedbackModal(sectionTitle, componentId, componentTitle)
- * with componentId = "<sectionId>::<componentIndex>". A recorder temporarily
- * patched over that global captures it — no modal opens — and the button's
- * `.component` block is then searched for download controls. In the app,
- * every download control sits in the same header as a Feedback button, so a
+ * window.openVisualFeedbackModal(...) with the component's identity. A recorder
+ * temporarily patched over that global captures the arguments — no modal opens
+ * — and the button's `.component` block is then searched for download
+ * controls. Two argument shapes exist:
+ *   - since the Oct 2026 deploy: (sectionTitle, componentId, componentTitle,
+ *     sectionId, subsectionId), componentId = the config's id ("comp-84cc1291");
+ *   - before: (sectionTitle, "<sectionId>::<index>", componentTitle).
+ * Screen order is NOT report order when a section has subsections, so matching
+ * is by id first, then the legacy index, then title (see matchComponents).
+ * Every download control sits in the same header as a Feedback button, so a
  * component with no Feedback button has no download control either; anything
  * found outside a mapped block is counted as an orphan.
  */
@@ -33,9 +39,11 @@ export const LAZY_TYPES = new Set(['line', 'bar', 'pie', 'bar_line', 'choropleth
 
 export interface MappedComponent {
   sIdx: number; // section, DOM order == report JSON order (the app renders every section, in order)
-  cIdx: number; // JSON component index from the button's componentId; -1 if unparseable
   k: number; // n-th visual Feedback button within its section — re-locates the block later
-  sectionTitle: string; // as the button passes it to the modal ('' on the subsection render path)
+  componentId: string; // as the button passes it: the config id, or legacy "<sectionId>::<index>"
+  cIdx: number; // JSON component index when componentId is the legacy form; else -1
+  sectionId: string; // passed by the button since the Oct 2026 deploy ('' before)
+  sectionTitle: string; // as the button passes it to the modal
   componentTitle: string;
   csv: number; // CSV download controls inside this component's block
   png: number; // chart-image download controls inside the block
@@ -67,10 +75,11 @@ function scanPage(page: Page): Promise<ControlsScan> {
       const sectionTitleShown: string[] = [];
       const lazyLeft: number[] = [];
       const blocks: Element[] = [];
-      const box: { v: { sectionTitle: string; componentId: string; componentTitle: string } | null } = { v: null };
+      const box: { args: unknown[] | null } = { args: null };
+      const str = (v: unknown) => (v == null ? '' : String(v));
       try {
-        w.openVisualFeedbackModal = (sectionTitle: string, componentId: string, componentTitle: string) => {
-          box.v = { sectionTitle, componentId, componentTitle };
+        w.openVisualFeedbackModal = (...args: unknown[]) => {
+          box.args = args;
         };
         const sections = Array.from(document.querySelectorAll(sectionsSel));
         sections.forEach((sec, si) => {
@@ -78,18 +87,21 @@ function scanPage(page: Page): Promise<ControlsScan> {
           sectionTitleShown.push((sec.querySelector('.section-header .section-title')?.textContent || '').trim());
           lazyLeft.push(sec.querySelectorAll('.chart-placeholder').length);
           Array.from(sec.querySelectorAll(visualSel)).forEach((b, k) => {
-            box.v = null;
+            box.args = null;
             (b as HTMLElement).click(); // handler calls the recorder above; no modal opens
-            const got = box.v as { sectionTitle: string; componentId: string; componentTitle: string } | null;
-            const idx = got ? parseInt(String(got.componentId).split('::').pop() || '', 10) : NaN;
+            const a = (box.args as unknown[] | null) ?? [];
+            const componentId = str(a[1]);
+            const legacy = componentId.match(/::(\d+)$/);
             const block = b.closest('.component');
             if (block) blocks.push(block);
             components.push({
               sIdx: si,
-              cIdx: Number.isFinite(idx) ? idx : -1,
               k,
-              sectionTitle: got ? got.sectionTitle : '',
-              componentTitle: got ? got.componentTitle : '',
+              componentId,
+              cIdx: legacy ? parseInt(legacy[1], 10) : -1,
+              sectionId: str(a[3]),
+              sectionTitle: str(a[0]),
+              componentTitle: str(a[2]),
               csv: block ? block.querySelectorAll(csvSel).length : 0,
               png: block ? block.querySelectorAll(pngSel).length : 0,
             });
@@ -121,4 +133,33 @@ function scanPage(page: Page): Promise<ControlsScan> {
       pngSel: PNG_BTN,
     },
   );
+}
+
+/** Key of a report component in the maps below (its JSON position). */
+export const compKey = (c: Pick<ComponentRow, 'sIdx' | 'cIdx'>) => `${c.sIdx}.${c.cIdx}`;
+
+/**
+ * Pair each on-screen component (from the scan) with its report component.
+ * Exact by the config's component id when the button passes one; else by the
+ * legacy "<sectionId>::<index>"; else by title within the same section, in
+ * order. Returns report-component key → its on-screen component.
+ */
+export function matchComponents(comps: ComponentRow[], scan: ControlsScan): Map<string, MappedComponent> {
+  const out = new Map<string, MappedComponent>();
+  const taken = new Set<MappedComponent>();
+  const claim = (c: ComponentRow, m: MappedComponent | undefined) => {
+    if (!m || taken.has(m) || out.has(compKey(c))) return;
+    out.set(compKey(c), m);
+    taken.add(m);
+  };
+  const byId = new Map<string, MappedComponent>();
+  for (const m of scan.components) if (m.componentId && m.cIdx < 0 && !byId.has(m.componentId)) byId.set(m.componentId, m);
+  for (const c of comps) if (c.id) claim(c, byId.get(c.id));
+  for (const c of comps) claim(c, scan.components.find((m) => !taken.has(m) && m.cIdx >= 0 && m.sIdx === c.sIdx && m.cIdx === c.cIdx));
+  for (const c of comps) {
+    if (out.has(compKey(c))) continue;
+    const t = c.title.trim().toLowerCase();
+    claim(c, scan.components.find((m) => !taken.has(m) && m.sIdx === c.sIdx && m.componentTitle.trim().toLowerCase() === t));
+  }
+  return out;
 }

@@ -7,9 +7,10 @@ import {
   SECTIONS,
   SECTION_FEEDBACK_BTN,
   VISUAL_FEEDBACK_BTN,
+  compKey,
+  matchComponents,
   scanControls,
   type ControlsScan,
-  type MappedComponent,
 } from './controls-scan';
 import { within } from './resilience';
 
@@ -169,8 +170,7 @@ export async function checkFeedback(page: Page, comps: ComponentRow[], scan?: Co
       `visuals=${s.components.length}/${comps.length} components`,
   );
 
-  const byKey = new Map<string, MappedComponent>();
-  for (const m of s.components) byKey.set(`${m.sIdx}.${m.cIdx}`, m);
+  const matched = matchComponents(comps, s);
 
   // Report-level button.
   out.push({
@@ -201,7 +201,7 @@ export async function checkFeedback(page: Page, comps: ComponentRow[], scan?: Co
 
   // Component-level buttons — the per-visual requirement.
   for (const c of comps) {
-    const hit = byKey.get(`${c.sIdx}.${c.cIdx}`);
+    const hit = matched.get(compKey(c));
     let state: FeedbackCheck['state'];
     let detail = '';
     if (nSections === 0) {
@@ -209,8 +209,8 @@ export async function checkFeedback(page: Page, comps: ComponentRow[], scan?: Co
       detail = 'report showed "No data available" — no components on screen to check';
     } else if (hit) {
       state = 'ok';
-      if (!hit.sectionTitle && c.section)
-        detail = 'opens without its section scope (subsection layout never passes the section title)';
+      if (!hit.sectionTitle && !hit.sectionId && c.section)
+        detail = 'opens without its section scope (the button passes neither a section title nor a section id)';
     } else if (c.state === 'broken') {
       state = 'na';
       detail = 'component failed to load — its error card has no Feedback button';
@@ -274,7 +274,7 @@ export async function checkFeedback(page: Page, comps: ComponentRow[], scan?: Co
   }
   if (s.components.length > 0) {
     const first = s.components[0];
-    const comp = comps.find((c) => c.sIdx === first.sIdx && c.cIdx === first.cIdx);
+    const comp = comps.find((c) => matched.get(compKey(c)) === first);
     const btn = page.locator(SECTIONS).nth(first.sIdx).locator(VISUAL_FEEDBACK_BTN).nth(first.k);
     const r = await exerciseModal(page, hoverClick(btn, btn.locator(OWNER_COMPONENT)), {
       scopeLabel: first.componentTitle ? 'Visual' : '',
@@ -288,8 +288,8 @@ export async function checkFeedback(page: Page, comps: ComponentRow[], scan?: Co
       type: comp?.type ?? '',
       state: r.ok ? 'ok' : 'broken',
       detail: r.detail,
-      sectionIndex: first.sIdx,
-      componentIndex: first.cIdx,
+      sectionIndex: comp?.sIdx ?? first.sIdx,
+      componentIndex: comp?.cIdx ?? first.cIdx,
     });
   }
 

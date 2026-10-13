@@ -8,6 +8,9 @@ export interface ComponentRow {
   /** Positional identity — stable across combos even when titles interpolate filters. */
   sIdx: number;
   cIdx: number;
+  /** The report config's own ids ('' when the config has none) — what the on-screen buttons carry. */
+  id: string;
+  sectionId: string;
   section: string;
   title: string;
   type: string;
@@ -72,6 +75,8 @@ export function componentStatesFromReport(rep: any): ComponentRow[] {
       rows.push({
         sIdx,
         cIdx,
+        id: typeof comp.id === 'string' ? comp.id : '',
+        sectionId: typeof s.id === 'string' ? s.id : '',
         section: s.title || s.id || '',
         title: comp.title || comp.type || '(untitled)',
         type: comp.type || '',
