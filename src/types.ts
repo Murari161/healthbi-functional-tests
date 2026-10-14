@@ -129,6 +129,49 @@ export interface PlatformResultRow extends PlatformCheck {
   setup: string;
 }
 
+/** One row in the filters output: how each filter's dropdown list loaded (per report). */
+export interface FilterResultRow {
+  timestamp: string;
+  reportId: string;
+  /** The filter's label as shown, e.g. "District". */
+  filter: string;
+  /** Its URL parameter, e.g. "district". */
+  param: string;
+  /** 'failed' = HTTP error or bad reply; 'empty' = the list had no values. */
+  status: 'ok' | 'failed' | 'empty';
+  /** How many values the dropdown offered. */
+  available: number;
+  /** The values this run used, " | "-separated. */
+  sampled: string;
+  /** Why it failed, or why an empty list is expected ("needs a district first"). */
+  error: string;
+}
+
+/** What an on-screen check found (see src/onscreen.ts). */
+export type OnScreenRule = 'junk-text' | 'over-100-percent' | 'negative-number';
+
+/**
+ * One row in the on-screen output: per report × combo × component × rule.
+ * Warnings only — recorded, shown and listed as defects, but they never fail the test.
+ */
+export interface OnScreenResultRow {
+  timestamp: string;
+  reportId: string;
+  comboLabel: string;
+  varies: string;
+  /** Absent when the on-screen block couldn't be matched to a report component. */
+  sectionIndex?: number;
+  componentIndex?: number;
+  section: string;
+  component: string;
+  type: string;
+  rule: OnScreenRule;
+  /** How many values (cells, KPI values, chart points) broke the rule in this view. */
+  count: number;
+  /** e.g. "3 values over 100% (highest 134.5%) — e.g. Kampala · ANC coverage % = 134.5%" */
+  detail: string;
+}
+
 /** One row in the standards output (design warnings; never fail the test). */
 export interface StandardsResultRow {
   timestamp: string;

@@ -8,7 +8,8 @@ import { componentStatesFromReport, fetchReportJson, type ComponentRow } from '.
 import { scanControls, type ControlsScan } from '../src/controls-scan';
 import { checkDownloads, type DownloadCheck } from '../src/downloads';
 import { checkFeedback, type FeedbackCheck } from '../src/feedback';
-import { triggerLazyComponents, waitForReportRender } from '../src/render';
+import { onScreenFindings, readOnScreen } from '../src/onscreen';
+import { screenshotReport, triggerLazyComponents, waitForReportRender } from '../src/render';
 import { loadReports } from '../src/reports';
 import { loadReportPage, SessionExpiredError, within } from '../src/resilience';
 import { standardsFromReport } from '../src/standards';
@@ -17,6 +18,8 @@ import {
   appendComponentResult,
   appendDownloadResult,
   appendFeedbackResult,
+  appendFilterResult,
+  appendOnScreenResult,
   appendStandardsResult,
   slug,
 } from '../src/summary';
@@ -30,6 +33,8 @@ import type { FilterCombo, ReportClassification, ResultRow } from '../src/types'
  *     or "not loaded" when the report page itself never arrived (even on a retry,
  *     including when the site is unreachable and the app shows "You are offline")
  *   - a full-page screenshot, plus one per broken component
+ *   - on-screen warnings (onscreen.csv): junk text, a percentage over 100%, a
+ *     negative number — in what is drawn; never fail the test
  * Once per report (on the first combo that loads): downloads, feedback, standards.
  * A report test FAILS only on ❌ broken; ⚪ empty is recorded, not failed. A combo
  * that goes wrong is recorded and the run carries on with the remaining combos;
@@ -87,8 +92,15 @@ for (const report of reports) {
 
     const capturedMatches = (params: Record<string, string>): boolean => {
       if (!capturedReport) return false;
+      let q: URLSearchParams | null = null;
+      try {
+        q = new URL(capturedUrl).searchParams; // decodes "+" as a space ("Abala+Health+Centre…")
+      } catch {
+        /* fall back to the raw text below */
+      }
       const u = decodeURIComponent(capturedUrl);
       for (const [k, v] of Object.entries(params)) {
+        if (q?.get(k) === v) continue;
         if (!u.includes(`${k}=`) || !u.includes(v)) return false;
       }
       return true;
@@ -136,6 +148,26 @@ for (const report of reports) {
     console.log(`▶ ${report.id}: ${matrix.length} filter combination(s)`);
 
     const brokenCombos: string[] = [];
+
+    // How each filter's dropdown list loaded. One that fails (e.g. HTTP 500) is
+    // broken for the user and can't be tested, so it fails the report.
+    for (const f of filters) {
+      appendFilterResult({
+        timestamp: new Date().toISOString(),
+        reportId: report.id,
+        filter: f.def.label || f.def.paramName,
+        param: f.def.paramName,
+        status: f.status,
+        available: f.available,
+        sampled: f.values.join(' | '),
+        error: f.error,
+      });
+      if (f.status === 'failed') brokenCombos.push(`[filters] the ${f.def.label || f.def.paramName} list failed to load: ${f.error}`);
+    }
+    const failedLists = filters.filter((f) => f.status === 'failed');
+    if (failedLists.length > 0)
+      console.log(`⚠ filter list(s) failed to load — ${failedLists.map((f) => `${f.def.paramName}: ${f.error}`).join('; ')} (not tested)`);
+
     // The latest component list seen on a page that loaded — used to mark each
     // component "not loaded" when a combo's page never arrives.
     let refComps: ComponentRow[] = capturedReport ? componentStatesFromReport(capturedReport) : [];
@@ -233,6 +265,11 @@ for (const report of reports) {
       const okComps = comps.filter((c) => c.state === 'ok');
       const emptyComps = comps.filter((c) => c.state === 'empty');
 
+      // On-screen checks on what is drawn: junk text (NaN, undefined…), a
+      // percentage over 100%, a negative number. Warnings — never fail the test.
+      const screen = rep ? await readOnScreen(page) : null;
+      const onScreen = screen ? onScreenFindings(screen, rep) : [];
+
       const reportLevel =
         dom.neverRendered ||
         dom.leakedPlaceholders ||
@@ -251,31 +288,21 @@ for (const report of reports) {
         ...(noData ? ['(report fetch failed)'] : []),
       ];
 
-      // Screenshots. Full page content via the sections container (captures its
-      // whole height — the app scrolls an inner container, so fullPage misses it).
+      // Screenshots: the whole report (see screenshotReport — the app scrolls an
+      // inner panel), then one per broken component (its "Failed to load data" card).
       const comboSlug = slug(combo.label);
       const fullShot = join(runDir(), 'screenshots', `${slug(report.id)}__${comboSlug}.png`);
-      await page
-        .locator('#sections-container')
-        .screenshot({ path: fullShot })
-        .catch(async () => {
-          await page.screenshot({ path: fullShot, fullPage: true }).catch(() => {});
-        });
-      // One screenshot per broken component (the rendered "Failed to load data" cards).
-      const errorCards = page.locator('#sections-container .component-error');
-      const nErr = await within(errorCards.count().catch(() => 0), 10_000, 0);
-      for (let i = 0; i < nErr; i++) {
-        const name =
-          (await errorCards.nth(i).locator('.component-error-title').textContent().catch(() => '')) ||
-          `component_${i}`;
-        const cshot = join(
-          runDir(),
-          'screenshots',
-          'components',
-          `${slug(report.id)}__${comboSlug}__${slug(name)}.png`,
-        );
-        await errorCards.nth(i).screenshot({ path: cshot }).catch(() => {});
-      }
+      await screenshotReport(page, fullShot, async () => {
+        const errorCards = page.locator('#sections-container .component-error');
+        const nErr = await within(errorCards.count().catch(() => 0), 10_000, 0);
+        for (let i = 0; i < nErr; i++) {
+          const name =
+            (await errorCards.nth(i).locator('.component-error-title').textContent().catch(() => '')) ||
+            `component_${i}`;
+          const cshot = join(runDir(), 'screenshots', 'components', `${slug(report.id)}__${comboSlug}__${slug(name)}.png`);
+          await errorCards.nth(i).screenshot({ path: cshot }).catch(() => {});
+        }
+      });
 
       const ts = new Date().toISOString();
       const effective = effectiveOf(combo, capturedUrl);
@@ -337,6 +364,22 @@ for (const report of reports) {
           type: comp.type,
           state: comp.state,
           error: comp.error,
+        });
+      }
+      for (const f of onScreen) {
+        appendOnScreenResult({
+          timestamp: ts,
+          reportId: report.id,
+          comboLabel: combo.label,
+          varies: combo.varies,
+          sectionIndex: f.sIdx,
+          componentIndex: f.cIdx >= 0 ? f.cIdx : undefined,
+          section: f.section,
+          component: f.component,
+          type: f.type,
+          rule: f.rule,
+          count: f.count,
+          detail: f.detail,
         });
       }
 
@@ -449,7 +492,15 @@ for (const report of reports) {
         timing.loadMs == null
           ? ' · load time unknown (never finished)'
           : ` · shown in ${sec(timing.loadMs)} (app setup ${sec(timing.setupMs)} · server ${sec(timing.serverMs)})`;
-      return { loaded: true, line: `${icon} ${state} — ${counts}${speed}${nav.attempts > 1 ? ' · ↻ loaded on the 2nd try' : ''}` };
+      const flags = onScreen.length
+        ? ` · ⚑ ${onScreen.length} on-screen warning${onScreen.length === 1 ? '' : 's'}`
+        : rep && !screen
+          ? ' · ⚑ on-screen check could not read the page'
+          : '';
+      return {
+        loaded: true,
+        line: `${icon} ${state} — ${counts}${speed}${flags}${nav.attempts > 1 ? ' · ↻ loaded on the 2nd try' : ''}`,
+      };
     };
 
     for (const [i, combo] of matrix.entries()) {

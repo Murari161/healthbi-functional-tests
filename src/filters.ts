@@ -13,9 +13,16 @@ import type { FilterCombo, FilterDefinition } from './types';
  * tolerant of common JSON shapes.
  */
 
-interface FilterWithValues {
+export interface FilterWithValues {
   def: FilterDefinition;
+  /** The values this run will use (sampled). */
   values: string[];
+  /** How the filter's dropdown list loaded: 'failed' = HTTP error or bad reply; 'empty' = no values. */
+  status: 'ok' | 'failed' | 'empty';
+  /** How many values the dropdown offered. */
+  available: number;
+  /** Why it failed, or why an empty list is expected (a parent filter has no value). */
+  error: string;
 }
 
 /**
@@ -63,23 +70,30 @@ function extractValues(body: unknown): string[] {
   return [];
 }
 
-/** Fetch valid values for one filter, injecting any parent params (cascades). */
+/**
+ * Fetch valid values for one filter, injecting any parent params (cascades).
+ * A failure is reported, not swallowed: a dropdown that can't load is something
+ * the user sees (an empty or broken filter), and the matrix can't test it.
+ */
 async function fetchFilterValues(
   page: Page,
   token: string | null,
   def: FilterDefinition,
   parentValues: Record<string, string>,
-): Promise<string[]> {
+): Promise<{ values: string[]; error: string }> {
   const url = filterEndpointUrl(def.apiEndpoint);
   for (const p of def.parentParams ?? []) {
     if (parentValues[p]) url.searchParams.set(p, parentValues[p]);
   }
   try {
     const res = await page.request.get(url.toString(), { headers: authHeader(token) });
-    if (!res.ok()) return [];
-    return extractValues(await res.json()).filter((v) => v && v !== 'null');
-  } catch {
-    return [];
+    if (!res.ok()) {
+      const said = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 160);
+      return { values: [], error: `HTTP ${res.status()}${said ? `: ${said}` : ''}` };
+    }
+    return { values: extractValues(await res.json()).filter((v) => v && v !== 'null'), error: '' };
+  } catch (e) {
+    return { values: [], error: String(e).split('\n')[0].slice(0, 160) };
   }
 }
 
@@ -117,10 +131,18 @@ export async function discoverFilters(
   for (const name of order) {
     const def = defs[name];
     if (!def) continue;
-    const values = await fetchFilterValues(page, token, def, firstValueByParam);
+    const { values, error } = await fetchFilterValues(page, token, def, firstValueByParam);
     const sampled = values.slice(0, sampleCount(def.paramName));
     if (sampled.length > 0) firstValueByParam[def.paramName] = sampled[0];
-    resolved.push({ def, values: sampled });
+    // An empty list is expected when a parent filter (e.g. district for facility) has no value.
+    const missingParents = (def.parentParams ?? []).filter((p) => !firstValueByParam[p] && Object.values(defs).some((d) => d.paramName === p));
+    resolved.push({
+      def,
+      values: sampled,
+      status: error ? 'failed' : values.length ? 'ok' : 'empty',
+      available: values.length,
+      error: error || (values.length === 0 && missingParents.length ? `needs a ${missingParents.join(' / ')} first` : ''),
+    });
   }
   return resolved;
 }

@@ -150,6 +150,35 @@ Times from 10s are amber and from 30s red (`LOAD_SLOW_MS` / `LOAD_VERY_SLOW_MS`)
 report is reported, never failed. The figures are also in `summary.csv` (`loadMs`,
 `pageMs`, `setupMs`, `slowestSetupCall`, `serverMs`, `downloadMs`, `drawMs`).
 
+**On-screen checks.** On every combination, the values on screen are read the way a
+user sees them, with nothing opened or drilled into: the table rows on show (the
+table's current page), KPI card values, and the values each chart drew. Three simple
+things are flagged:
+
+| Flag | When |
+|------|------|
+| broken text | `NaN`, `undefined`, `Infinity`, `null` or `[object Object]` shown as a value or text |
+| over 100% | a percentage above 100%, where the value is shown with "%" or its column/series name says "%" |
+| negative number | a value below zero |
+
+This is not a data-quality check: no source data is touched. To stay quiet on purpose,
+columns, series and KPIs named as a change, difference or trend are skipped (they can be
+negative or above 100%), so are "% of target" ones, and so are negatives on population
+pyramids and waterfall charts (drawn that way). Coverage against population estimates
+can exceed 100% for real; that is still flagged, as something to check. Flags show as
+**!** in the grid (hover it), as a list under each report, and in `onscreen.csv`. They
+never fail the test.
+
+**Filter lists.** Each filter's dropdown list is loaded the way the app loads it. A list
+that fails (e.g. HTTP 500) is broken for users and its filter can't be tested, so it
+**fails the report** and is printed during the run; an empty list is recorded too
+(unless it's empty only because a parent filter, e.g. district for facility, has no
+value). Shown per report as "⚙ Filter lists" (values offered, or ✗ did not load), and in
+`filters.csv`.
+
+Charts and maps are drawn only when scrolled into view, so the suite scrolls each report
+top to bottom with the mouse wheel, like a person, before reading or photographing it.
+
 Once per report (on the baseline combo) it also checks:
 
 | Check | What it does | Fails the test? |
@@ -179,6 +208,32 @@ Known app gaps these checks report as missing: `text`, `kpi` and `cards` compone
 never render a Feedback button; `infobox`, `text`, `kpi`, `cards`, `choropleth` and `map`
 components never get a download button. A component that failed to load shows an
 error card with neither (reported as "–", not checkable).
+
+## Defect list
+
+After every run, everything the checks found is turned into a **defect list**: one row per
+problem (not one per filter combination), at the top of the results page and in
+`defects.csv` (opens in Excel; Jira can import it). Each row has an ID, severity, a
+one-line summary for a ticket title, the report, section and component, the problem,
+**what was seen**, the **expected result**, how often it was seen (e.g. "3 of 6
+combinations"), the filters of the first view it was seen in, a **link that reproduces
+it**, and the screenshot to attach. Owner is left blank for a person to assign.
+
+| Severity | Problems |
+|----------|----------|
+| **High** | a component shows "Failed to load data" · `{{placeholder}}` text shown · broken text (NaN, undefined…) · the whole report failed (timeout box, fetch error) · the report page never loaded · a filter's dropdown list didn't load |
+| **Medium** | no data in the default view, or in every combination tested · a percentage over 100% · a negative number · very slow (≥ `LOAD_VERY_SLOW_MS`) · the Feedback form misbehaves · a Share-menu check failed · a filter's dropdown list is empty · a view the suite couldn't finish (look at it by hand) |
+| **Low** | a download that doesn't work · no download button · no Feedback button · a Share-menu warning |
+
+Components that fail with the **same error in the same views** are one row, not one
+each, and when one filter explains it the row says so — e.g. *21 components show "Failed
+to load data" whenever facility is set — pq: column reference "facility" is ambiguous*.
+"No data" is listed only when a component is empty in the **default view** (what users
+see first) or in **every** combination tested. Empty for some filters only (e.g. a
+district with no cases) is normal and not listed. When most of a report opens empty, it
+is one report-level row (usually the default period has no data yet). Missing buttons
+are grouped per component type. The scheme lives in `SEVERITY` in `src/defects.ts`.
+`npm run report:html` rebuilds the list for the latest run.
 
 ## The filter matrix
 
@@ -213,8 +268,11 @@ In that folder:
   **Downloads** and **Feedback** columns give each component's ✓ ok / ✗ failed /
   missing status. Under each grid, the **Combination key** lists every combo with
   one column per filter — **bold** = set by the test, grey = the app's own
-  default, — = not applied — plus its result. Open this first. Regenerate anytime
-  with `npm run report:html`.
+  default, — = not applied — plus its result. The **defect list** sits at the top.
+  Open this first. Regenerate anytime with `npm run report:html`.
+- **`defects.csv`** — the defect list (see [Defect list](#defect-list)).
+- `onscreen.csv` (+ `.jsonl`) — one row per on-screen flag (report, combo, component, flag, detail).
+- `filters.csv` (+ `.jsonl`) — one row per filter: did its dropdown list load, how many values, which ones were used.
 - **`components.csv`** / `.jsonl` — the per-component drill-down: one row per
   (report, combo, section, component, type, **state**, error).
 - `summary.csv` / `.jsonl` — the combo-level roll-up: one row per (report, combo)
@@ -223,7 +281,8 @@ In that folder:
 - `downloads.csv`, `feedback.csv`, `standards.csv` (+ `.jsonl`) — one row per
   download control / feedback check / standards warning.
 - `platform.csv` (+ `.jsonl`) — one row per platform check (test, what was found, pass/fail).
-- `screenshots/<report>__<combo>.png` — full **report** screenshot per combo.
+- `screenshots/<report>__<combo>.png` — the **whole report**, top to bottom, per combo
+  (the window is stretched to the report's height for the picture, capped at 16,000 px).
 - `screenshots/components/<report>__<combo>__<component>.png` — a screenshot of
   each **broken component** card.
 

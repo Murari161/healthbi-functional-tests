@@ -1,10 +1,13 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { config, runDir } from './config';
+import { buildDefects, writeDefectsCsv, type Severity } from './defects';
 import type {
   ComponentResultRow,
   DownloadResultRow,
   FeedbackResultRow,
+  FilterResultRow,
+  OnScreenResultRow,
   PlatformResultRow,
   StandardsResultRow,
 } from './types';
@@ -116,7 +119,39 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   const sts: StandardsResultRow[] = readJsonl(join(dir, 'standards.jsonl'));
   const fbs: FeedbackResultRow[] = readJsonl(join(dir, 'feedback.jsonl'));
   const pfs: PlatformResultRow[] = readJsonl(join(dir, 'platform.jsonl'));
+  const ons: OnScreenResultRow[] = readJsonl(join(dir, 'onscreen.jsonl'));
+  const fls: FilterResultRow[] = readJsonl(join(dir, 'filters.jsonl'));
   if (comps.length === 0 && summary.length === 0 && pfs.length === 0) return;
+
+  // The defect list: one row per problem, with a severity (src/defects.ts).
+  const defects = buildDefects({ summary, comps, dls, fbs, pfs, onscreen: ons, filters: fls }, dir);
+  const defectsCsv = writeDefectsCsv(dir, defects);
+  const sevCount = (s: Severity) => defects.filter((d) => d.severity === s).length;
+  const defectsHtml = `
+      <section class="defects">
+        <h2>Defect list</h2>${
+          defects.length === 0
+            ? '<p class="meta"><span class="good">No problems found ✓</span></p>'
+            : `
+        <p class="meta">${defects.length} problem${defects.length === 1 ? '' : 's'}: <span class="sev High">${sevCount('High')} High</span> <span class="sev Medium">${sevCount('Medium')} Medium</span> <span class="sev Low">${sevCount('Low')} Low</span>
+          · one row per problem, not per filter combination · hover a problem for the expected result, “seen in” for the filters
+          · saved as <a href="defects.csv">defects.csv</a> (opens in Excel; Jira can import it)</p>
+        <div class="dwrap"><table class="dtable"><thead><tr><th>ID</th><th>Severity</th><th>Report</th><th>Component</th><th>Problem</th><th>What was seen</th><th>Seen in</th><th>Links</th></tr></thead><tbody>${defects
+          .map(
+            (d) =>
+              `<tr><td class="did">${d.id}</td><td><span class="sev ${d.severity}">${d.severity}</span></td><td class="drep" title="${esc(d.reportId)}">${esc(d.reportId.split('/').pop())}</td><td class="dcomp">${d.section ? `<span class="bk-sec">${esc(d.section)}</span><br>` : ''}${esc(d.component)}</td><td class="dprob" title="Expected: ${esc(d.expected)}">${esc(d.problem)}</td><td class="dact">${esc(d.actual)}</td><td class="dseen" title="${esc(d.filters)}">${esc(d.seenIn)}</td><td class="dlinks">${d.reproduce ? `<a href="${esc(d.reproduce)}" target="_blank" rel="noopener">open</a>` : ''}${d.evidence ? ` · <a href="${esc(d.evidence)}" target="_blank">screenshot</a>` : ''}</td></tr>`,
+          )
+          .join('')}</tbody></table></div>`
+        }
+      </section>`;
+
+  // On-screen warnings, counted once per report × component × rule.
+  const onScreenGroups = new Set(ons.map((o) => `${o.reportId}${SEP}${keyOf(o)}${SEP}${o.rule}`)).size;
+  const RULE_NAME: Record<string, string> = {
+    'junk-text': 'broken text',
+    'over-100-percent': 'over 100%',
+    'negative-number': 'negative number',
+  };
 
   // Platform checks (same code on every report, run once): a plain table at the top.
   const pfIcon = (s: string) => (s === 'pass' ? '✓ pass' : s === 'warn' ? '⚠ warning' : '✗ fail');
@@ -167,6 +202,14 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     for (const r of rows) {
       stateMap.set(`${keyOf(r)}${SEP}${r.comboLabel}`, r.state);
       if (r.error) errMap.set(`${keyOf(r)}${SEP}${r.comboLabel}`, r.error);
+    }
+    // On-screen warnings per cell (shown as "!" beside the dot).
+    const ros = ons.filter((o) => o.reportId === reportId);
+    const onMap = new Map<string, string>();
+    for (const o of ros) {
+      const k = `${keyOf(o)}${SEP}${o.comboLabel}`;
+      const line = `On screen — ${RULE_NAME[o.rule] ?? o.rule}: ${o.detail}`;
+      onMap.set(k, onMap.has(k) ? `${onMap.get(k)}\n${line}` : line);
     }
 
     const combosForReport = summary.filter((s) => s.reportId === reportId);
@@ -319,7 +362,10 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
         const color = (CELL as Record<string, string>)[st] || 'transparent';
         const title =
           st === 'broken' || st === 'not_loaded' ? ` title="${esc(err || 'Failed to load data')}"` : '';
-        tbody += `<td class="cell"${title}><span class="dot" style="background:${color}"></span></td>`;
+        const os = onMap.get(`${ck.key}${SEP}${combo}`);
+        tbody += `<td class="cell"${title}><span class="dot" style="background:${color}"></span>${
+          os ? `<span class="osw" title="${esc(os)}">!</span>` : ''
+        }</td>`;
       }
       tbody += '</tr>';
     }
@@ -429,6 +475,23 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       brokenHtml += `<h3 class="bk-title">⚠ Broken combos — report-level (${comboLevel.length})</h3><ul class="broken-list">${items}</ul>`;
     }
 
+    // On-screen warnings, grouped by component and rule, with the combos they showed under.
+    const onGroups = new Map<string, { o: OnScreenResultRow; combos: string[] }>();
+    for (const o of ros) {
+      const k = `${keyOf(o)}${SEP}${o.rule}`;
+      if (!onGroups.has(k)) onGroups.set(k, { o, combos: [] });
+      onGroups.get(k)!.combos.push(o.comboLabel);
+    }
+    if (onGroups.size > 0) {
+      const items = [...onGroups.values()]
+        .map(
+          (g) =>
+            `<li><div class="bk-head">${g.o.section ? `<span class="bk-sec">${esc(g.o.section)}</span> ` : ''}<b>${esc(g.o.component)}</b> <span class="bk-sec">(${esc(RULE_NAME[g.o.rule] ?? g.o.rule)})</span></div><div class="err">${esc(g.o.detail)}</div><div class="bk-combos">under: ${g.combos.map(comboRef).join(' ')}</div></li>`,
+        )
+        .join('');
+      brokenHtml += `<h3 class="bk-title warnt">⚑ On-screen checks (${onGroups.size})</h3><ul class="broken-list warnt">${items}</ul>`;
+    }
+
     // Standards warnings (house style; never fail the test).
     const rst = sts.filter((t) => t.reportId === reportId);
     if (rst.length > 0) {
@@ -536,6 +599,20 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       }</p>`;
     }
 
+    // How each filter's dropdown list loaded (hover for the values used / the error).
+    const rfl = fls.filter((f) => f.reportId === reportId);
+    const filtersMeta = rfl.length
+      ? `<p class="meta">⚙ Filter lists: ${rfl
+          .map((f) =>
+            f.status === 'ok'
+              ? `<span title="${esc(`${f.available} values · this run used: ${f.sampled}`)}">${esc(f.filter)} <span class="good">✓ ${f.available}</span></span>`
+              : f.status === 'failed'
+                ? `<span title="${esc(f.error)}">${esc(f.filter)} <span class="bad">✗ did not load</span></span>`
+                : `<span title="${esc(f.error || 'the list had no values')}">${esc(f.filter)} <span class="${f.error ? 'muted' : 'warnt'}">— empty${f.error ? ` (${esc(f.error)})` : ''}</span></span>`,
+          )
+          .join(' · ')}</p>`
+      : '';
+
     reportSections.push(`
       <section class="report">
         <h2>${esc(reportId)}</h2>
@@ -555,8 +632,11 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
                   rdlMissing.length ? ` · <span class="warnt">⬇ ${rdlMissing.length} without a download button</span>` : ''
                 }`
               : ''
-          }${fbMeta}${rst.length > 0 ? ` · <span class="chip std">☰ ${rst.length} standards</span>` : ''}</p>
+          }${fbMeta}${onGroups.size > 0 ? ` · <span class="chip warn">⚑ ${onGroups.size} on-screen</span>` : ''}${
+            rst.length > 0 ? ` · <span class="chip std">☰ ${rst.length} standards</span>` : ''
+          }</p>
         ${timingMeta}
+        ${filtersMeta}
         <div class="tablewrap"><table class="grid">${thead}${tbody}</table></div>
         ${keyHtml}
         ${brokenHtml}
@@ -688,6 +768,22 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   .err{font-family:ui-monospace,monospace;font-size:12px;color:#7f1d1d;margin:4px 0;white-space:pre-wrap;word-break:break-word}
   .err-none{color:#9ca3af;font-style:italic}
   .bk-combos{font-size:12px;color:#555;margin-top:2px}
+  .osw{display:inline-block;margin-left:2px;font-size:11px;font-weight:800;color:#b45309;vertical-align:1px;cursor:help}
+  .defects{margin:18px 0 8px}
+  .dwrap{overflow:auto;max-height:62vh;border:1px solid #e5e7eb;border-radius:8px;max-width:1500px}
+  table.dtable{border-collapse:collapse;font-size:12px;width:100%}
+  table.dtable th,table.dtable td{border-bottom:1px solid #eee;padding:6px 10px;text-align:left;vertical-align:top}
+  table.dtable thead th{position:sticky;top:0;z-index:1;background:#f9fafb;font-weight:700;border-bottom:2px solid #d1d5db}
+  td.did{font-family:ui-monospace,monospace;white-space:nowrap;color:#374151}
+  td.drep,td.dseen,td.dlinks{white-space:nowrap}
+  td.dseen{cursor:help}
+  td.dcomp{min-width:170px;max-width:300px}
+  td.dprob{font-weight:600;white-space:nowrap;cursor:help}
+  td.dact{min-width:260px;max-width:560px;color:#374151;word-break:break-word}
+  .sev{display:inline-block;padding:1px 8px;border-radius:10px;font-weight:700;font-size:11px}
+  .sev.High{background:#fee2e2;color:#991b1b}
+  .sev.Medium{background:#fef3c7;color:#92400e}
+  .sev.Low{background:#e0e7ff;color:#3730a3}
 </style></head><body>
   <h1>Report functional audit — component × filter grid</h1>
   <p class="legend">Generated ${esc(new Date().toLocaleString())} ·
@@ -698,6 +794,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     <span class="dot" style="background:${CELL.not_loaded}"></span>component not loaded (the page never loaded, even on a retry)
     <span class="dot" style="background:#fff;border:1px solid #d1d5db"></span>not checked
     · <span class="rt">↻</span> = page loaded only on the 2nd try
+    · <span class="osw">!</span> = on-screen warning, e.g. a percentage over 100% (hover it)
     · columns are filter combinations (Combo 1…N) — each report's <b>Combination key</b> lists the exact filters
   </p>
   <p class="summary"><b>${comps.length}</b> component checks ·
@@ -717,9 +814,16 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     ${dlClickedAll.length > 0 ? `<span class="chip ${dlFailedAll.length ? 'bad' : 'good'}">⬇ ${dlClickedAll.length - dlFailedAll.length}/${dlClickedAll.length} downloads ok</span>` : ''}
     ${dlMissingAll.length > 0 ? `<span class="chip warn">⬇ ${dlMissingAll.length} without a download button</span>` : ''}
     ${fbs.length > 0 ? `<span class="chip ${fbModalAllOk < fbModalAll.length ? 'bad' : fbVisualAllOk < fbVisualAll.length ? 'warn' : 'good'}">💬 ${fbVisualAllOk}/${fbVisualAll.length} with Feedback · form ${fbModalAllOk}/${fbModalAll.length} ok</span>` : ''}
+    ${onScreenGroups > 0 ? `<span class="chip warn">⚑ ${onScreenGroups} on-screen warning${onScreenGroups === 1 ? '' : 's'}</span>` : ''}
     ${sts.length > 0 ? `<span class="chip std">☰ ${sts.length} standards</span>` : ''}
+    ${
+      defects.length > 0
+        ? `<span class="chip ${sevCount('High') ? 'bad' : sevCount('Medium') ? 'warn' : 'std'}">◆ ${defects.length} defect${defects.length === 1 ? '' : 's'} (${sevCount('High')} High)</span>`
+        : ''
+    }
     · <span class="${totalBrokenCombos ? 'bad' : 'good'}">${totalBrokenCombos} of ${summary.length} combos broken</span></p>
   ${platformHtml}
+  ${defectsHtml}
   ${reportSections.join('\n')}
 </body></html>`;
 
@@ -781,4 +885,16 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   if (sts.length > 0) {
     console.log(`  ${col('34', '☰')} ${sts.length} standards warning(s)`);
   }
+  if (onScreenGroups > 0) {
+    const byRule = (rule: string) => new Set(ons.filter((o) => o.rule === rule).map((o) => `${o.reportId}${SEP}${keyOf(o)}`)).size;
+    const parts = Object.keys(RULE_NAME)
+      .map((rule) => [byRule(rule), RULE_NAME[rule]] as const)
+      .filter(([n]) => n > 0)
+      .map(([n, name]) => `${n} ${name}`);
+    console.log(`  ${col('33', '⚑')} on-screen: ${onScreenGroups} warning(s) — ${parts.join(' · ')}`);
+  }
+  const high = sevCount('High');
+  console.log(
+    `  ${col(high ? '31' : defects.length ? '33' : '32', '◆')} defects: ${high} high · ${sevCount('Medium')} medium · ${sevCount('Low')} low → ${defectsCsv}`,
+  );
 }

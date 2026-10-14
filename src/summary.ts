@@ -5,6 +5,8 @@ import type {
   ComponentResultRow,
   DownloadResultRow,
   FeedbackResultRow,
+  FilterResultRow,
+  OnScreenResultRow,
   PlatformResultRow,
   ResultRow,
   StandardsResultRow,
@@ -33,10 +35,30 @@ function outPaths() {
     FB_JSONL: join(dir, 'feedback.jsonl'),
     PF_CSV: join(dir, 'platform.csv'),
     PF_JSONL: join(dir, 'platform.jsonl'),
+    ON_CSV: join(dir, 'onscreen.csv'),
+    ON_JSONL: join(dir, 'onscreen.jsonl'),
+    FL_CSV: join(dir, 'filters.csv'),
+    FL_JSONL: join(dir, 'filters.jsonl'),
   };
 }
 
+const FL_HEADER = ['timestamp', 'reportId', 'filter', 'param', 'status', 'available', 'sampled', 'error'].join(',');
+
 const PF_HEADER = ['timestamp', 'reportId', 'setup', 'area', 'check', 'status', 'found'].join(',');
+const ON_HEADER = [
+  'timestamp',
+  'reportId',
+  'comboLabel',
+  'varies',
+  'section',
+  'component',
+  'type',
+  'rule',
+  'count',
+  'detail',
+  'sectionIndex',
+  'componentIndex',
+].join(',');
 
 const DL_HEADER = [
   'timestamp',
@@ -119,8 +141,25 @@ const COMP_HEADER = [
  * restart (e.g. after a heavy report times out), wiping earlier reports' rows.
  */
 export function initSummary(): void {
-  const { dir, CSV, JSONL, COMP_CSV, COMP_JSONL, DL_CSV, DL_JSONL, ST_CSV, ST_JSONL, FB_CSV, FB_JSONL, PF_CSV, PF_JSONL } =
-    outPaths();
+  const {
+    dir,
+    CSV,
+    JSONL,
+    COMP_CSV,
+    COMP_JSONL,
+    DL_CSV,
+    DL_JSONL,
+    ST_CSV,
+    ST_JSONL,
+    FB_CSV,
+    FB_JSONL,
+    PF_CSV,
+    PF_JSONL,
+    ON_CSV,
+    ON_JSONL,
+    FL_CSV,
+    FL_JSONL,
+  } = outPaths();
   mkdirSync(dir, { recursive: true });
   writeFileSync(CSV, HEADER + '\n', 'utf8');
   writeFileSync(JSONL, '', 'utf8');
@@ -134,6 +173,47 @@ export function initSummary(): void {
   writeFileSync(FB_JSONL, '', 'utf8');
   writeFileSync(PF_CSV, PF_HEADER + '\n', 'utf8');
   writeFileSync(PF_JSONL, '', 'utf8');
+  writeFileSync(ON_CSV, ON_HEADER + '\n', 'utf8');
+  writeFileSync(ON_JSONL, '', 'utf8');
+  writeFileSync(FL_CSV, FL_HEADER + '\n', 'utf8');
+  writeFileSync(FL_JSONL, '', 'utf8');
+}
+
+/** Append one filter-list row (append-only; safe across worker restarts). */
+export function appendFilterResult(row: FilterResultRow): void {
+  const { FL_CSV, FL_JSONL } = outPaths();
+  ensureFile(FL_CSV, FL_HEADER + '\n');
+  ensureFile(FL_JSONL, '');
+  const line = [row.timestamp, row.reportId, row.filter, row.param, row.status, row.available, row.sampled, row.error]
+    .map(csvCell)
+    .join(',');
+  appendFileSync(FL_CSV, line + '\n', 'utf8');
+  appendFileSync(FL_JSONL, JSON.stringify(row) + '\n', 'utf8');
+}
+
+/** Append one on-screen-check row (append-only; safe across worker restarts). */
+export function appendOnScreenResult(row: OnScreenResultRow): void {
+  const { ON_CSV, ON_JSONL } = outPaths();
+  ensureFile(ON_CSV, ON_HEADER + '\n');
+  ensureFile(ON_JSONL, '');
+  const line = [
+    row.timestamp,
+    row.reportId,
+    row.comboLabel,
+    row.varies,
+    row.section,
+    row.component,
+    row.type,
+    row.rule,
+    row.count,
+    row.detail,
+    row.sectionIndex ?? '',
+    row.componentIndex ?? '',
+  ]
+    .map(csvCell)
+    .join(',');
+  appendFileSync(ON_CSV, line + '\n', 'utf8');
+  appendFileSync(ON_JSONL, JSON.stringify(row) + '\n', 'utf8');
 }
 
 /** Append one platform-check row (append-only; safe across worker restarts). */
