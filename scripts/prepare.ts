@@ -1,4 +1,4 @@
-import { chromium } from '@playwright/test';
+import { chromium, type BrowserContext, type Page } from '@playwright/test';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { config } from '../src/config';
@@ -10,9 +10,11 @@ import type { ReportListItem } from '../src/types';
  *   1. Logs in through Keycloak as a NORMAL user and saves the session.
  *   2. Enumerates the reports that user can see and caches the list.
  *
- * The browser opens HEADED so you can watch — and, if the automated form fill
- * doesn't match your Keycloak theme (or there's MFA), you can simply log in by
- * hand in that window; the script waits for you to land back in the app.
+ * A saved session is first checked in a hidden browser: if it still works it is
+ * reused and no window opens. Only when it is missing or expired does a window
+ * open — a fresh one, with no stale cookies — so the sign-in page shows once.
+ * (Checking in the visible window and then reloading it to clear the old
+ * cookies made the sign-in page appear twice.)
  *
  * Two ways to log in:
  *   - MANUAL (recommended): leave HEALTHBI_USER/PASS unset and just sign in by
@@ -23,39 +25,55 @@ import type { ReportListItem } from '../src/types';
  */
 
 const LOGIN_TIMEOUT = 5 * 60 * 1000; // allow time for manual login / MFA
+const appUrl = `${config.baseUrl}/`; // trailing slash: nginx serves the app at /report-browser/
 
 async function main() {
   mkdirSync(dirname(config.storageStatePath), { recursive: true });
   mkdirSync(dirname(config.reportsCachePath), { recursive: true });
 
-  const haveSavedSession = existsSync(config.storageStatePath);
-  const browser = await chromium.launch({ headless: false });
-  const context = await browser.newContext(
-    haveSavedSession ? { storageState: config.storageStatePath } : {},
-  );
-  const page = await context.newPage();
-  const getToken = attachTokenCapture(page);
+  if (existsSync(config.storageStatePath)) {
+    if (await reuseSavedSession()) return;
+    console.log('→ Saved session expired — opening a sign-in window…');
+  }
+  await signIn();
+}
 
-  const appUrl = `${config.baseUrl}/`; // trailing slash: nginx serves the app at /report-browser/
-  console.log(`→ Opening ${appUrl} …`);
-  await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
-
-  // If a saved session is still valid, the app loads and mints a token without a
-  // login prompt — reuse it. Otherwise fall through to the login flow.
-  let token = haveSavedSession ? await waitForToken(page, getToken, 8_000) : null;
-
-  if (token) {
+/** Check the saved session without opening a window; if it works, refresh it and the report list. */
+async function reuseSavedSession(): Promise<boolean> {
+  console.log('→ Checking the saved session…');
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext({ storageState: config.storageStatePath });
+    const page = await context.newPage();
+    const getToken = attachTokenCapture(page);
+    await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
+    // A token means the app is signed in; the sign-in form means the session expired.
+    const token = await Promise.race([
+      waitForToken(page, getToken, 8_000),
+      page
+        .waitForSelector('#kc-login, #kc-form-login', { timeout: 8_000 })
+        .then(() => null)
+        .catch(() => null),
+    ]);
+    if (!token) return false;
     console.log('✓ Reused existing session (no login needed).');
-    await page.waitForSelector('#aimara-tree-container', { timeout: LOGIN_TIMEOUT }).catch(() => {});
-  } else {
-    // The saved session was missing or expired — clear any stale cookies so the
-    // login flow starts clean (dead Keycloak cookies can cause bad redirects /
-    // nginx 404s), then re-open the app fresh.
-    if (haveSavedSession) {
-      console.log('→ Saved session expired — clearing it and logging in fresh…');
-      await context.clearCookies().catch(() => {});
-      await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
-    }
+    await page.waitForSelector('#aimara-tree-container', { timeout: 30_000 }).catch(() => {});
+    await saveSessionAndReports(context, page, token);
+    return true;
+  } finally {
+    await browser.close();
+  }
+}
+
+/** Open a fresh window (no stale cookies) and wait for the user to sign in, or fill the form from .env. */
+async function signIn(): Promise<void> {
+  const browser = await chromium.launch({ headless: false });
+  try {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const getToken = attachTokenCapture(page);
+    console.log(`→ Opening ${appUrl} …`);
+    await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
 
     // Login. Selectors confirmed on the live Health BI Keycloak page
     // (realm MoH): #username / #password / #kc-login.
@@ -81,16 +99,21 @@ async function main() {
     console.log('→ Waiting for the app to load (report tree)…');
     await page.waitForURL((url) => url.href.startsWith(config.baseUrl), { timeout: LOGIN_TIMEOUT });
     await page.waitForSelector('#aimara-tree-container', { timeout: LOGIN_TIMEOUT });
-  }
 
+    // The API wants a Keycloak Bearer token (not cookies): reuse the one the app sends on its own calls.
+    console.log('→ Capturing auth token…');
+    const token = await waitForToken(page, getToken);
+    if (!token) throw new Error('No Bearer token captured — is the session still valid? Try logging in again.');
+    await saveSessionAndReports(context, page, token);
+  } finally {
+    await browser.close();
+  }
+}
+
+/** Save the signed-in session and cache the reports this user can see (same endpoint the UI uses). */
+async function saveSessionAndReports(context: BrowserContext, page: Page, token: string): Promise<void> {
   await context.storageState({ path: config.storageStatePath });
   console.log(`✓ Saved authenticated session → ${config.storageStatePath}`);
-
-  // Enumerate reports via the same endpoint the UI uses. The API wants a Keycloak
-  // Bearer token (not cookies), so reuse the one the app just sent on its own calls.
-  console.log('→ Capturing auth token…');
-  token = token ?? (await waitForToken(page, getToken));
-  if (!token) throw new Error('No Bearer token captured — is the session still valid? Try logging in again.');
 
   console.log('→ Fetching report list…');
   const res = await page.request.get(`${config.apiBase}/reports`, { headers: authHeader(token) });
@@ -101,8 +124,6 @@ async function main() {
 
   writeFileSync(config.reportsCachePath, JSON.stringify(reports, null, 2), 'utf8');
   console.log(`✓ Cached ${reports.length} reports → ${config.reportsCachePath}`);
-
-  await browser.close();
 }
 
 main().catch((err) => {

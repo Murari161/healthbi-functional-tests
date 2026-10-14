@@ -64,8 +64,9 @@ Leave `HEALTHBI_USER` / `HEALTHBI_PASS` blank in `.env` for manual login (recomm
 ```bash
 npm run prepare-run
 ```
-A browser opens — sign in by hand. On success it prints `✓ Cached N reports`. If the
-saved session is still valid it is reused and the window just flashes by (no login needed).
+It first checks the saved session in a hidden browser: if it still works it is reused and
+no window opens. Otherwise one fresh browser window opens on the sign-in page — sign in by
+hand. On success it prints `✓ Cached N reports`.
 
 **Step 3 — run the audit.** One report first (good smoke test):
 ```bash
