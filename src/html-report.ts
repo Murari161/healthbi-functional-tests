@@ -53,14 +53,14 @@ function listBlock(title: string, cls: string, items: string): string {
   return `<details class="sub"${open ? ' open' : ''}><summary class="bk-title${c}">${title}</summary><ul class="broken-list${c}">${items}</ul></details>`;
 }
 
-/** Links to a defect's pictures: "component" / "page" for one; "page 1 2 3 …" for several. */
+/** Links to a defect's pictures: "section" / "component" / "page" for one; "page 1 2 3 …" for several. */
 function pictureLinks(paths: string[]): string {
   const a = (p: string, text: string) => `<a href="${esc(p)}" target="_blank">${text}</a>`;
-  const isComponent = (p: string) => p.includes('/components/');
+  const kind = (p: string) => (p.includes('/sections/') ? 'section' : p.includes('/components/') ? 'component' : 'page');
   if (paths.length === 0) return '';
-  if (paths.length === 1) return ` · picture: ${a(paths[0], isComponent(paths[0]) ? 'component' : 'page')}`;
+  if (paths.length === 1) return ` · picture: ${a(paths[0], kind(paths[0]))}`;
   let n = 0;
-  const shown = paths.slice(0, 9).map((p) => a(p, isComponent(p) ? String(++n) : 'page'));
+  const shown = paths.slice(0, 9).map((p) => a(p, kind(p) === 'page' ? 'page' : String(++n)));
   return ` · pictures: ${shown.join(' ')}${paths.length > 9 ? ` (+${paths.length - 9} more in defects.csv)` : ''}`;
 }
 

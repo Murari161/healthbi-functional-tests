@@ -228,18 +228,25 @@ export function buildDefects(r: RunResults, dir: string): Defect[] {
       return p ? [p] : [];
     };
     const at = (label?: string) => ({ filters: where(label), reproduce: url(label), evidence: page(label) });
-    /** A component's own picture in a view: by position ("c<s>_<c>"), else its "Failed to load data" card (by title). */
+    /**
+     * A component's picture in a view: its whole section with it outlined ("s<s>"),
+     * else (older runs) the component alone ("c<s>_<c>"), else its "Failed to load data" card.
+     */
     const pic = (label: string | undefined, m: { sectionIndex?: number; componentIndex?: number; component?: string }) => {
       if (!label) return '';
-      const base = join(dir, 'screenshots', 'components', `${slug(reportId)}__${slug(label)}__`);
-      const byPosition = m.sectionIndex != null && m.componentIndex != null ? `${base}c${m.sectionIndex}_${m.componentIndex}.png` : '';
-      const byTitle = m.component ? `${base}${slug(m.component)}.png` : '';
-      for (const p of [byPosition, byTitle]) if (p && existsSync(p)) return rel(p);
+      const name = `${slug(reportId)}__${slug(label)}__`;
+      const shots = join(dir, 'screenshots');
+      const candidates = [
+        m.sectionIndex != null ? join(shots, 'sections', `${name}s${m.sectionIndex}.png`) : '',
+        m.sectionIndex != null && m.componentIndex != null ? join(shots, 'components', `${name}c${m.sectionIndex}_${m.componentIndex}.png`) : '',
+        m.component ? join(shots, 'components', `${name}${slug(m.component)}.png`) : '',
+      ];
+      for (const p of candidates) if (p && existsSync(p)) return rel(p);
       return '';
     };
-    /** Pictures of these components in a view; the whole-report picture when there are none. */
+    /** Pictures of these components in a view (one per section); the whole-report picture when there are none. */
     const pics = (label: string | undefined, ms: Array<{ sectionIndex?: number; componentIndex?: number; component?: string }>) => {
-      const ps = ms.map((m) => pic(label, m)).filter(Boolean);
+      const ps = [...new Set(ms.map((m) => pic(label, m)).filter(Boolean))];
       return ps.length ? ps : page(label);
     };
     const add = (kind: Kind, d: Omit<Draft, 'kind' | 'reportId' | 'reportOrder'>) => drafts.push({ kind, reportId, reportOrder, ...d });
@@ -296,7 +303,7 @@ export function buildDefects(r: RunResults, dir: string): Defect[] {
         seenIn: seen(failing.length, loaded.length),
         ...at(label),
         // Many: the whole page first (it shows them all), then each one's card.
-        evidence: many ? [...page(label), ...gs.map((g) => pic(label, g.first)).filter(Boolean)] : pics(label, [c]),
+        evidence: many ? [...new Set([...page(label), ...gs.map((g) => pic(label, g.first)).filter(Boolean)])] : pics(label, [c]),
         order: many ? -1 : orderOf(c),
       });
     }

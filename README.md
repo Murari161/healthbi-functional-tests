@@ -289,11 +289,13 @@ In that folder:
   (the window is stretched to the report's height for the picture, capped at 16,000 px).
 - `screenshots/components/<report>__<combo>__<component>.png` — a screenshot of
   each **broken component** card.
-- `screenshots/components/<report>__<combo>__c<section>_<component>.png` — a picture of
-  just the component, for each one with a problem: no download or Feedback button, a
-  download or Feedback form that failed, no data (default view), or an on-screen flag.
-  The defect list links each row to its component's picture (several for a grouped row),
-  falling back to the whole-report picture.
+- `screenshots/sections/<report>__<combo>__s<section>.png` — a picture of the **whole
+  section** (heading and all) holding a component with a problem — no download or
+  Feedback button, a download or Feedback form that failed, no data (default view), an
+  on-screen flag, or a failed component (when no more than 5 failed in that view) — with
+  those components **outlined in red** (drawn by the test, only in the picture). One
+  picture per section per view. The defect list links each row to its section
+  picture(s), falling back to the whole-report picture.
 
 Component states come from the report JSON the browser fetches (same payload that
 renders the page): a component with `error` set → broken, with data → ok, else empty.

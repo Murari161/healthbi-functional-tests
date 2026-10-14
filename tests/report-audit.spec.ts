@@ -9,7 +9,7 @@ import { scanControls, type ControlsScan } from '../src/controls-scan';
 import { checkDownloads, type DownloadCheck } from '../src/downloads';
 import { checkFeedback, type FeedbackCheck } from '../src/feedback';
 import { blockIndex, onScreenFindings, readOnScreen } from '../src/onscreen';
-import { screenshotComponents, screenshotReport, triggerLazyComponents, waitForReportRender } from '../src/render';
+import { screenshotReport, screenshotSections, triggerLazyComponents, waitForReportRender } from '../src/render';
 import { loadReports } from '../src/reports';
 import { loadReportPage, SessionExpiredError, within } from '../src/resilience';
 import { standardsFromReport } from '../src/standards';
@@ -269,7 +269,7 @@ for (const report of reports) {
       // percentage over 100%, a negative number. Warnings — never fail the test.
       const screen = rep ? await readOnScreen(page) : null;
       const onScreen = screen ? onScreenFindings(screen, rep) : [];
-      // Components to photograph on their own (evidence for the defect list), by "s.c".
+      // Components to show (outlined, in a picture of their section) as evidence for the defect list, by "s.c".
       const pictureOf = new Set<string>(onScreen.filter((f) => f.cIdx >= 0).map((f) => `${f.sIdx}.${f.cIdx}`));
 
       const reportLevel =
@@ -473,7 +473,7 @@ for (const report of reports) {
         }
         if (fbProblems.length > 0) brokenCombos.push(`[feedback] ${fbProblems.join('; ')}`);
 
-        // Photograph each component these checks found a problem with, and the empty ones.
+        // Show each component these checks found a problem with, and the empty ones.
         const at = (s?: number, c?: number) => (s != null && c != null ? `${s}.${c}` : '');
         for (const c of comps) if (c.state === 'empty') pictureOf.add(`${c.sIdx}.${c.cIdx}`);
         for (const chk of checks) if (chk.state === 'missing' || chk.state === 'failed') pictureOf.add(at(chk.sectionIndex, chk.componentIndex));
@@ -481,16 +481,27 @@ for (const report of reports) {
           if (fb.scope === 'visual' && (fb.state === 'missing' || fb.state === 'broken')) pictureOf.add(at(fb.sectionIndex, fb.componentIndex));
       }
 
-      // Pictures of single components: screenshots/components/<report>__<combo>__c<s>_<c>.png
+      // A few failed components get a section picture too (when many fail, the
+      // whole-report picture shows it better).
+      if (brokenComps.length <= 5) for (const c of brokenComps) pictureOf.add(`${c.sIdx}.${c.cIdx}`);
+
+      // Pictures of each section holding such a component, the components outlined:
+      // screenshots/sections/<report>__<combo>__s<section>.png
       const where = screen ? blockIndex(screen, rep) : new Map<string, { sIdx: number; n: number }>();
-      await screenshotComponents(
+      const outlines = new Map<number, number[]>();
+      for (const k of pictureOf) {
+        const pos = where.get(k);
+        if (!pos) continue;
+        if (!outlines.has(pos.sIdx)) outlines.set(pos.sIdx, []);
+        outlines.get(pos.sIdx)!.push(pos.n);
+      }
+      await screenshotSections(
         page,
-        [...pictureOf].flatMap((k) => {
-          const pos = where.get(k);
-          return pos
-            ? [{ ...pos, path: join(runDir(), 'screenshots', 'components', `${slug(report.id)}__${comboSlug}__c${k.replace('.', '_')}.png`) }]
-            : [];
-        }),
+        [...outlines].map(([sIdx, outline]) => ({
+          sIdx,
+          outline,
+          path: join(runDir(), 'screenshots', 'sections', `${slug(report.id)}__${comboSlug}__s${sIdx}.png`),
+        })),
       );
 
       if (state === 'broken') {

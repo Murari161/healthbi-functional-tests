@@ -135,20 +135,29 @@ export async function screenshotReport(page: Page, path: string, extra?: () => P
 }
 
 /**
- * Photograph single components, each found by its section and its position
- * among that section's component blocks (see blockIndex in src/onscreen.ts).
+ * Photograph whole sections, heading and all, so a picture shows where a
+ * component sits. The components a picture is about (their positions among the
+ * section's component blocks, see blockIndex in src/onscreen.ts) get a red
+ * outline — drawn by the test for the picture only: a temporary marker
+ * attribute plus a screenshot-only style. The app itself is not changed.
  */
-export async function screenshotComponents(page: Page, shots: Array<{ sIdx: number; n: number; path: string }>): Promise<void> {
+export async function screenshotSections(page: Page, shots: Array<{ sIdx: number; outline: number[]; path: string }>): Promise<void> {
   if (shots.length === 0) return;
   await page.mouse.move(1, 1).catch(() => {}); // no hover state in the pictures
   await whileStretched(page, async () => {
     for (const s of shots) {
-      await page
-        .locator('#sections-container > .section')
-        .nth(s.sIdx)
-        .locator('.component:not(.component .component)')
-        .nth(s.n)
-        .screenshot({ path: s.path, timeout: 10_000 })
+      const section = page.locator('#sections-container > .section').nth(s.sIdx);
+      const blocks = section.locator('.component:not(.component .component)');
+      for (const n of s.outline) await blocks.nth(n).evaluate((el) => el.setAttribute('data-qa-outline', '')).catch(() => {});
+      await section
+        .screenshot({
+          path: s.path,
+          timeout: 15_000,
+          style: '[data-qa-outline]{outline:3px solid #dc2626 !important;outline-offset:3px}',
+        })
+        .catch(() => {});
+      await section
+        .evaluate((el) => el.querySelectorAll('[data-qa-outline]').forEach((x) => x.removeAttribute('data-qa-outline')))
         .catch(() => {});
     }
   });
