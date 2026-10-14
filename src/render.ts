@@ -123,6 +123,39 @@ async function wheelThroughReport(page: Page): Promise<void> {
  * report (capped at 16,000 px), then put back.
  */
 export async function screenshotReport(page: Page, path: string, extra?: () => Promise<void>): Promise<void> {
+  await whileStretched(page, async () => {
+    await page
+      .locator('#sections-container')
+      .screenshot({ path, timeout: 30_000 })
+      .catch(async () => {
+        await page.screenshot({ path, fullPage: true }).catch(() => {});
+      });
+    if (extra) await extra(); // more pictures while the whole report is on screen
+  });
+}
+
+/**
+ * Photograph single components, each found by its section and its position
+ * among that section's component blocks (see blockIndex in src/onscreen.ts).
+ */
+export async function screenshotComponents(page: Page, shots: Array<{ sIdx: number; n: number; path: string }>): Promise<void> {
+  if (shots.length === 0) return;
+  await page.mouse.move(1, 1).catch(() => {}); // no hover state in the pictures
+  await whileStretched(page, async () => {
+    for (const s of shots) {
+      await page
+        .locator('#sections-container > .section')
+        .nth(s.sIdx)
+        .locator('.component:not(.component .component)')
+        .nth(s.n)
+        .screenshot({ path: s.path, timeout: 10_000 })
+        .catch(() => {});
+    }
+  });
+}
+
+/** Run `fn` with the window stretched to show the whole report (capped at 16,000 px), then put it back. */
+async function whileStretched(page: Page, fn: () => Promise<void>): Promise<void> {
   const vp = page.viewportSize();
   const hidden = await within(
     page
@@ -139,13 +172,7 @@ export async function screenshotReport(page: Page, path: string, extra?: () => P
       await page.setViewportSize({ width: vp.width, height: Math.min(vp.height + hidden, 16_000) });
       await page.waitForTimeout(600); // let charts and maps re-fit the taller window
     }
-    await page
-      .locator('#sections-container')
-      .screenshot({ path, timeout: 30_000 })
-      .catch(async () => {
-        await page.screenshot({ path, fullPage: true }).catch(() => {});
-      });
-    if (extra) await extra(); // more pictures while the whole report is on screen
+    await fn();
   } finally {
     if (vp && hidden > 0) await page.setViewportSize(vp).catch(() => {});
   }

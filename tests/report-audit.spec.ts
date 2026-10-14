@@ -8,8 +8,8 @@ import { componentStatesFromReport, fetchReportJson, type ComponentRow } from '.
 import { scanControls, type ControlsScan } from '../src/controls-scan';
 import { checkDownloads, type DownloadCheck } from '../src/downloads';
 import { checkFeedback, type FeedbackCheck } from '../src/feedback';
-import { onScreenFindings, readOnScreen } from '../src/onscreen';
-import { screenshotReport, triggerLazyComponents, waitForReportRender } from '../src/render';
+import { blockIndex, onScreenFindings, readOnScreen } from '../src/onscreen';
+import { screenshotComponents, screenshotReport, triggerLazyComponents, waitForReportRender } from '../src/render';
 import { loadReports } from '../src/reports';
 import { loadReportPage, SessionExpiredError, within } from '../src/resilience';
 import { standardsFromReport } from '../src/standards';
@@ -269,6 +269,8 @@ for (const report of reports) {
       // percentage over 100%, a negative number. Warnings — never fail the test.
       const screen = rep ? await readOnScreen(page) : null;
       const onScreen = screen ? onScreenFindings(screen, rep) : [];
+      // Components to photograph on their own (evidence for the defect list), by "s.c".
+      const pictureOf = new Set<string>(onScreen.filter((f) => f.cIdx >= 0).map((f) => `${f.sIdx}.${f.cIdx}`));
 
       const reportLevel =
         dom.neverRendered ||
@@ -470,7 +472,26 @@ for (const report of reports) {
           else if (fb.state === 'missing' && config.feedbackMissingFails) fbProblems.push(`${label}: ${fb.detail}`);
         }
         if (fbProblems.length > 0) brokenCombos.push(`[feedback] ${fbProblems.join('; ')}`);
+
+        // Photograph each component these checks found a problem with, and the empty ones.
+        const at = (s?: number, c?: number) => (s != null && c != null ? `${s}.${c}` : '');
+        for (const c of comps) if (c.state === 'empty') pictureOf.add(`${c.sIdx}.${c.cIdx}`);
+        for (const chk of checks) if (chk.state === 'missing' || chk.state === 'failed') pictureOf.add(at(chk.sectionIndex, chk.componentIndex));
+        for (const fb of fbChecks)
+          if (fb.scope === 'visual' && (fb.state === 'missing' || fb.state === 'broken')) pictureOf.add(at(fb.sectionIndex, fb.componentIndex));
       }
+
+      // Pictures of single components: screenshots/components/<report>__<combo>__c<s>_<c>.png
+      const where = screen ? blockIndex(screen, rep) : new Map<string, { sIdx: number; n: number }>();
+      await screenshotComponents(
+        page,
+        [...pictureOf].flatMap((k) => {
+          const pos = where.get(k);
+          return pos
+            ? [{ ...pos, path: join(runDir(), 'screenshots', 'components', `${slug(report.id)}__${comboSlug}__c${k.replace('.', '_')}.png`) }]
+            : [];
+        }),
+      );
 
       if (state === 'broken') {
         const detail = noData

@@ -142,8 +142,11 @@ export interface Defect {
   filters: string;
   /** Deep link that opens that view. */
   reproduce: string;
-  /** Screenshot path inside the run folder ('' when there is none). */
-  evidence: string;
+  /**
+   * Screenshots inside the run folder: the component's own picture(s) where the
+   * suite took one, else the whole report in that view; [] when there is none.
+   */
+  evidence: string[];
   /** Left blank for a person to assign. */
   owner: string;
 }
@@ -169,7 +172,7 @@ interface Draft {
   seenIn: string;
   filters: string;
   reproduce: string;
-  evidence: string;
+  evidence: string[];
   /** Sort keys: report position (-1 = platform) and component position (-1 = whole report). */
   reportOrder: number;
   order: number;
@@ -219,8 +222,26 @@ export function buildDefects(r: RunResults, dir: string): Defect[] {
     };
     const seen = (n: number, of: number) => (of <= 1 ? 'the one view tested' : n >= of ? `all ${of} combinations` : `${n} of ${of} combinations`);
     const url = (label?: string) => combo(label)?.url || reportUrl(reportId, {});
-    const shot = (label?: string) => rel(combo(label)?.screenshot);
-    const at = (label?: string) => ({ filters: where(label), reproduce: url(label), evidence: shot(label) });
+    /** The whole-report picture of a view. */
+    const page = (label?: string) => {
+      const p = rel(combo(label)?.screenshot);
+      return p ? [p] : [];
+    };
+    const at = (label?: string) => ({ filters: where(label), reproduce: url(label), evidence: page(label) });
+    /** A component's own picture in a view: by position ("c<s>_<c>"), else its "Failed to load data" card (by title). */
+    const pic = (label: string | undefined, m: { sectionIndex?: number; componentIndex?: number; component?: string }) => {
+      if (!label) return '';
+      const base = join(dir, 'screenshots', 'components', `${slug(reportId)}__${slug(label)}__`);
+      const byPosition = m.sectionIndex != null && m.componentIndex != null ? `${base}c${m.sectionIndex}_${m.componentIndex}.png` : '';
+      const byTitle = m.component ? `${base}${slug(m.component)}.png` : '';
+      for (const p of [byPosition, byTitle]) if (p && existsSync(p)) return rel(p);
+      return '';
+    };
+    /** Pictures of these components in a view; the whole-report picture when there are none. */
+    const pics = (label: string | undefined, ms: Array<{ sectionIndex?: number; componentIndex?: number; component?: string }>) => {
+      const ps = ms.map((m) => pic(label, m)).filter(Boolean);
+      return ps.length ? ps : page(label);
+    };
     const add = (kind: Kind, d: Omit<Draft, 'kind' | 'reportId' | 'reportOrder'>) => drafts.push({ kind, reportId, reportOrder, ...d });
     const rc = r.comps.filter((c) => c.reportId === reportId);
 
@@ -236,7 +257,7 @@ export function buildDefects(r: RunResults, dir: string): Defect[] {
             : `The ${f.filter} dropdown list is empty, so this filter could not be tested`,
         seenIn: 'every view',
         ...at(baseLabel),
-        evidence: '',
+        evidence: [],
         order: -2,
       });
     }
@@ -265,7 +286,6 @@ export function buildDefects(r: RunResults, dir: string): Defect[] {
       const when = whenever(failing, loaded);
       const list = many ? names(gs.map((g) => g.first.component)) : '';
       const sections = [...new Set(gs.map((g) => g.first.section))];
-      const card = join(dir, 'screenshots', 'components', `${slug(reportId)}__${slug(label)}__${slug(c.component)}.png`);
       add(kind, {
         section: sections.length === 1 ? sections[0] : '',
         component: many ? `${gs.length} components` : c.component,
@@ -275,7 +295,8 @@ export function buildDefects(r: RunResults, dir: string): Defect[] {
             : `${c.error}${when ? `, ${when}` : ''}${many ? ` (${list})` : ''}`,
         seenIn: seen(failing.length, loaded.length),
         ...at(label),
-        evidence: !many && existsSync(card) ? rel(card) : shot(label),
+        // Many: the whole page first (it shows them all), then each one's card.
+        evidence: many ? [...page(label), ...gs.map((g) => pic(label, g.first)).filter(Boolean)] : pics(label, [c]),
         order: many ? -1 : orderOf(c),
       });
     }
@@ -320,6 +341,7 @@ export function buildDefects(r: RunResults, dir: string): Defect[] {
         actual: g.first.detail,
         seenIn: seen(g.combos.length, loaded.length),
         ...at(g.combos[0]),
+        evidence: pics(g.combos[0], [g.first]),
         order: orderOf(g.first),
       });
     }
@@ -354,7 +376,7 @@ export function buildDefects(r: RunResults, dir: string): Defect[] {
         seenIn: seen(notLoaded.length, combos.length),
         filters: where(notLoaded[0].comboLabel),
         reproduce: notLoaded[0].url,
-        evidence: '',
+        evidence: [],
         order: -1,
       });
     }
@@ -380,6 +402,7 @@ export function buildDefects(r: RunResults, dir: string): Defect[] {
           expected: 'The component shows data for at least one of the periods and places tested, or says why there is none.',
           seenIn: seen(empties.length, loaded.length),
           ...at(baseLabel),
+          evidence: pics(baseLabel, [rows[0]]),
           order: orderOf(rows[0]),
         });
       } else if (baseLabel && rows.some((c) => c.comboLabel === baseLabel && c.state === 'empty')) {
@@ -407,6 +430,7 @@ export function buildDefects(r: RunResults, dir: string): Defect[] {
           expected: 'The component shows data in the default view (what users see first), or says why there is none.',
           seenIn: 'default view',
           ...at(baseLabel),
+          evidence: pics(baseLabel, [rows[0]]),
           order: orderOf(rows[0]),
         });
       }
@@ -435,6 +459,7 @@ export function buildDefects(r: RunResults, dir: string): Defect[] {
         actual: `${d.kind ? `${d.kind.toUpperCase()} download: ` : ''}${d.error || 'no file arrived'}`,
         seenIn: 'default view',
         ...at(baseLabel),
+        evidence: pics(baseLabel, [d]),
         order: orderOf(d),
       });
     }
@@ -452,6 +477,7 @@ export function buildDefects(r: RunResults, dir: string): Defect[] {
         actual: `${one ? 'No download button' : `No download button on: ${names(ds.map((d) => d.component || '?'))}`} (${ds[0].error})`,
         seenIn: 'default view',
         ...at(baseLabel),
+        evidence: pics(baseLabel, ds),
         order: one ? orderOf(ds[0]) : 999_998,
       });
     }
@@ -461,7 +487,15 @@ export function buildDefects(r: RunResults, dir: string): Defect[] {
     const fbWhere = (f: FeedbackResultRow) =>
       f.scope === 'report' ? '(report header)' : f.scope === 'section' ? `(section) ${f.section}` : f.component;
     for (const f of rfb.filter((x) => x.check === 'modal' && x.state === 'broken')) {
-      add('feedback-form', { section: f.section, component: fbWhere(f), actual: f.detail, seenIn: 'default view', ...at(baseLabel), order: orderOf(f) });
+      add('feedback-form', {
+        section: f.section,
+        component: fbWhere(f),
+        actual: f.detail,
+        seenIn: 'default view',
+        ...at(baseLabel),
+        evidence: f.scope === 'visual' ? pics(baseLabel, [f]) : page(baseLabel),
+        order: orderOf(f),
+      });
     }
     const noFeedback = new Map<string, FeedbackResultRow[]>();
     for (const f of rfb.filter((x) => x.check === 'button' && x.state === 'missing')) {
@@ -478,6 +512,7 @@ export function buildDefects(r: RunResults, dir: string): Defect[] {
         actual: `${one ? 'No Feedback button' : `No Feedback button on: ${names(fs.map(fbWhere))}`}${fs[0].detail ? ` (${fs[0].detail})` : ''}`,
         seenIn: 'default view',
         ...at(baseLabel),
+        evidence: fs[0].scope === 'visual' ? pics(baseLabel, fs) : page(baseLabel),
         order: one ? orderOf(fs[0]) : 999_998,
       });
     }
@@ -497,7 +532,7 @@ export function buildDefects(r: RunResults, dir: string): Defect[] {
       seenIn: 'once per run (the same on every report)',
       filters: p.setup,
       reproduce: reportUrl(p.reportId, {}),
-      evidence: '',
+      evidence: [],
       reportOrder: -1,
       order: -1,
     });
@@ -571,7 +606,7 @@ export function writeDefectsCsv(dir: string, defects: Defect[]): string {
       d.seenIn,
       d.filters,
       d.reproduce,
-      d.evidence,
+      d.evidence.join(' | '),
       d.owner,
     ]),
   ].map((row) => row.map(cell).join(','));

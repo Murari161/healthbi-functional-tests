@@ -43,6 +43,27 @@ function esc(s: unknown): string {
   );
 }
 
+/**
+ * A collapsible list under a report. Problems (red, purple) start open; warnings
+ * and notes (amber, blue) start closed — the defect list at the top sums them up.
+ */
+function listBlock(title: string, cls: string, items: string): string {
+  const open = cls === '' || cls === 'leak';
+  const c = cls ? ` ${cls}` : '';
+  return `<details class="sub"${open ? ' open' : ''}><summary class="bk-title${c}">${title}</summary><ul class="broken-list${c}">${items}</ul></details>`;
+}
+
+/** Links to a defect's pictures: "component" / "page" for one; "page 1 2 3 …" for several. */
+function pictureLinks(paths: string[]): string {
+  const a = (p: string, text: string) => `<a href="${esc(p)}" target="_blank">${text}</a>`;
+  const isComponent = (p: string) => p.includes('/components/');
+  if (paths.length === 0) return '';
+  if (paths.length === 1) return ` · picture: ${a(paths[0], isComponent(paths[0]) ? 'component' : 'page')}`;
+  let n = 0;
+  const shown = paths.slice(0, 9).map((p) => a(p, isComponent(p) ? String(++n) : 'page'));
+  return ` · pictures: ${shown.join(' ')}${paths.length > 9 ? ` (+${paths.length - 9} more in defects.csv)` : ''}`;
+}
+
 /** not_loaded (amber): the report page itself never arrived, even on a retry. */
 const CELL = { ok: '#16a34a', empty: '#d1d5db', broken: '#dc2626', not_loaded: '#f59e0b' } as const;
 /** Leakage: raw {{placeholder}} text reached the user (page works, template didn't). */
@@ -128,22 +149,21 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   const defectsCsv = writeDefectsCsv(dir, defects);
   const sevCount = (s: Severity) => defects.filter((d) => d.severity === s).length;
   const defectsHtml = `
-      <section class="defects">
-        <h2>Defect list</h2>${
+      <details class="block defects" open>
+        <summary><h2>Defect list</h2> ${
           defects.length === 0
-            ? '<p class="meta"><span class="good">No problems found ✓</span></p>'
-            : `
-        <p class="meta">${defects.length} problem${defects.length === 1 ? '' : 's'}: <span class="sev High">${sevCount('High')} High</span> <span class="sev Medium">${sevCount('Medium')} Medium</span> <span class="sev Low">${sevCount('Low')} Low</span>
-          · one row per problem, not per filter combination · hover a problem for the expected result, “seen in” for the filters
+            ? '<span class="good">no problems found ✓</span></summary>'
+            : `<span class="sum">${defects.length} problem${defects.length === 1 ? '' : 's'}: <span class="sev High">${sevCount('High')} High</span> <span class="sev Medium">${sevCount('Medium')} Medium</span> <span class="sev Low">${sevCount('Low')} Low</span></span></summary>
+        <p class="meta">One row per problem, not per filter combination · hover a problem for the expected result, “seen in” for the filters
           · saved as <a href="defects.csv">defects.csv</a> (opens in Excel; Jira can import it)</p>
         <div class="dwrap"><table class="dtable"><thead><tr><th>ID</th><th>Severity</th><th>Report</th><th>Component</th><th>Problem</th><th>What was seen</th><th>Seen in</th><th>Links</th></tr></thead><tbody>${defects
           .map(
             (d) =>
-              `<tr><td class="did">${d.id}</td><td><span class="sev ${d.severity}">${d.severity}</span></td><td class="drep" title="${esc(d.reportId)}">${esc(d.reportId.split('/').pop())}</td><td class="dcomp">${d.section ? `<span class="bk-sec">${esc(d.section)}</span><br>` : ''}${esc(d.component)}</td><td class="dprob" title="Expected: ${esc(d.expected)}">${esc(d.problem)}</td><td class="dact">${esc(d.actual)}</td><td class="dseen" title="${esc(d.filters)}">${esc(d.seenIn)}</td><td class="dlinks">${d.reproduce ? `<a href="${esc(d.reproduce)}" target="_blank" rel="noopener">open</a>` : ''}${d.evidence ? ` · <a href="${esc(d.evidence)}" target="_blank">screenshot</a>` : ''}</td></tr>`,
+              `<tr><td class="did">${d.id}</td><td><span class="sev ${d.severity}">${d.severity}</span></td><td class="drep" title="${esc(d.reportId)}">${esc(d.reportId.split('/').pop())}</td><td class="dcomp">${d.section ? `<span class="bk-sec">${esc(d.section)}</span><br>` : ''}${esc(d.component)}</td><td class="dprob" title="Expected: ${esc(d.expected)}">${esc(d.problem)}</td><td class="dact">${esc(d.actual)}</td><td class="dseen" title="${esc(d.filters)}">${esc(d.seenIn)}</td><td class="dlinks">${d.reproduce ? `<a href="${esc(d.reproduce)}" target="_blank" rel="noopener">open</a>` : ''}${pictureLinks(d.evidence)}</td></tr>`,
           )
           .join('')}</tbody></table></div>`
         }
-      </section>`;
+      </details>`;
 
   // On-screen warnings, counted once per report × component × rule.
   const onScreenGroups = new Set(ons.map((o) => `${o.reportId}${SEP}${keyOf(o)}${SEP}${o.rule}`)).size;
@@ -158,8 +178,8 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   const pfPass = pfs.filter((p) => p.status === 'pass').length;
   const platformHtml = pfs.length
     ? `
-      <section class="platform">
-        <h2>Platform checks</h2>
+      <details class="block platform" open>
+        <summary><h2>Platform checks</h2> <span class="sum ${pfPass === pfs.length ? 'good' : 'bad'}">${pfPass}/${pfs.length} pass</span></summary>
         <p class="meta">The same on every report, so checked once per run, on ${esc(pfs[0].setup)}</p>
         <table class="ptable"><thead><tr><th>Test</th><th>What was found</th><th>Result</th></tr></thead><tbody>${pfs
           .map(
@@ -167,7 +187,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
               `<tr><td class="pt">${esc(p.area)} · ${esc(p.check)}</td><td>${esc(p.found)}</td><td class="pr ${esc(p.status)}">${pfIcon(p.status)}</td></tr>`,
           )
           .join('')}</tbody></table>
-      </section>`
+      </details>`
     : '';
 
   // Reports in run order; one whose page never loaded may have summary rows only.
@@ -178,6 +198,8 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     byReport.get(c.reportId)!.push(c);
   }
 
+  // Up to 3 reports start open; a bigger run starts with every report folded to its one-line summary.
+  const openReports = byReport.size <= 3;
   const reportSections: string[] = [];
   for (const [reportId, rows] of byReport) {
     // Columns in run order from the combo roll-ups, so a combo with no component
@@ -377,7 +399,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
     for (const c of combos)
       for (const [k] of [...parseCombo(comboSummary(c)?.effective || ''), ...parseCombo(c)])
         if (!filterKeys.includes(k)) filterKeys.push(k);
-    let keyHtml = `<h3 class="key-title">Combination key — the filters each Combo column ran with</h3><table class="ckey"><thead><tr><th>Combination</th>${filterKeys
+    let keyHtml = `<details class="sub" open><summary class="key-title">Combination key — the filters each Combo column ran with</summary><table class="ckey"><thead><tr><th>Combination</th>${filterKeys
       .map((k) => `<th>${esc(k)}</th>`)
       .join('')}<th>Result</th><th>Load time</th></tr></thead><tbody>`;
     combos.forEach((c, i) => {
@@ -412,7 +434,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
           : '–';
       keyHtml += `<td class="cres"${tip}><span class="dot" style="background:${color}"></span> ${esc(label)}${counts ? ` <span class="cnt">(${counts})</span>` : ''}${retried}</td><td class="ctime"${s?.loadMs != null ? ` title="${esc(timingTip(s))}"` : ''}>${loadCell}</td></tr>`;
     });
-    keyHtml += `</tbody></table><p class="key-note"><b>bold</b> = set by this combination · plain grey = the app's own default (not chosen by the test) · — = filter not applied</p>`;
+    keyHtml += `</tbody></table><p class="key-note"><b>bold</b> = set by this combination · plain grey = the app's own default (not chosen by the test) · — = filter not applied</p></details>`;
 
     const rc: Record<string, number> = { ok: 0, broken: 0, empty: 0, not_loaded: 0 };
     for (const r of rows) rc[r.state] = (rc[r.state] ?? 0) + 1;
@@ -444,7 +466,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
           return `<li><div class="bk-head">${g.section ? `<span class="bk-sec">${esc(g.section)}</span> ` : ''}<b>${esc(g.component)}</b></div>${errHtml}<div class="bk-combos">under: ${combosTxt}</div></li>`;
         })
         .join('');
-      brokenHtml = `<h3 class="bk-title">⚠ Broken components (${byComp.size})</h3><ul class="broken-list">${items}</ul>`;
+      brokenHtml = listBlock(`⚠ Broken components (${byComp.size})`, '', items);
     }
 
     // Leakage: raw {{placeholder}} text reached the user. Its own category.
@@ -457,7 +479,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
             `<li><div class="bk-head">${comboRef(cb.comboLabel)} <span class="bk-sec">${esc(fullText(cb.comboLabel))}</span></div><div class="err">${esc(cb.brokenComponents || 'leaked {{placeholder}}')}</div></li>`,
         )
         .join('');
-      brokenHtml += `<h3 class="bk-title leak">⬤ Leakage — raw {{placeholder}} shown to the user (${leakedList.length})</h3><ul class="broken-list leak">${items}</ul>`;
+      brokenHtml += listBlock(`⬤ Leakage — raw {{placeholder}} shown to the user (${leakedList.length})`, 'leak', items);
     }
 
     // Other report-level breakage (whole-report timeout / fetch failure):
@@ -472,7 +494,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
             `<li><div class="bk-head">${comboRef(cb.comboLabel)} <span class="bk-sec">${esc(fullText(cb.comboLabel))}</span></div><div class="err">${esc(cb.brokenComponents || 'broken (no detail recorded)')}</div></li>`,
         )
         .join('');
-      brokenHtml += `<h3 class="bk-title">⚠ Broken combos — report-level (${comboLevel.length})</h3><ul class="broken-list">${items}</ul>`;
+      brokenHtml += listBlock(`⚠ Broken combos — report-level (${comboLevel.length})`, '', items);
     }
 
     // On-screen warnings, grouped by component and rule, with the combos they showed under.
@@ -489,7 +511,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
             `<li><div class="bk-head">${g.o.section ? `<span class="bk-sec">${esc(g.o.section)}</span> ` : ''}<b>${esc(g.o.component)}</b> <span class="bk-sec">(${esc(RULE_NAME[g.o.rule] ?? g.o.rule)})</span></div><div class="err">${esc(g.o.detail)}</div><div class="bk-combos">under: ${g.combos.map(comboRef).join(' ')}</div></li>`,
         )
         .join('');
-      brokenHtml += `<h3 class="bk-title warnt">⚑ On-screen checks (${onGroups.size})</h3><ul class="broken-list warnt">${items}</ul>`;
+      brokenHtml += listBlock(`⚑ On-screen checks (${onGroups.size})`, 'warnt', items);
     }
 
     // Standards warnings (house style; never fail the test).
@@ -501,7 +523,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
             `<li><div class="bk-head">${t.section ? `<span class="bk-sec">${esc(t.section)}</span> ` : ''}<b>${esc(t.component)}</b> <span class="bk-sec">(${esc(t.type)} · ${esc(t.rule)})</span></div><div class="err">${esc(t.detail)}</div></li>`,
         )
         .join('');
-      brokenHtml += `<h3 class="bk-title std">☰ Standards warnings (${rst.length})</h3><ul class="broken-list std">${items}</ul>`;
+      brokenHtml += listBlock(`☰ Standards warnings (${rst.length})`, 'std', items);
     }
 
     // Download details (per-component statuses are in the Downloads column):
@@ -518,7 +540,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
             `<li><div class="bk-head">${dlWhere(d2)}${d2.kind ? ` <span class="bk-sec">— ${esc(d2.kind.toUpperCase())} download</span>` : ''}</div><div class="err">${esc(d2.error || 'download failed')}</div></li>`,
         )
         .join('');
-      brokenHtml += `<h3 class="bk-title">⬇ Failed downloads (${rdlFailed.length})</h3><ul class="broken-list">${items}</ul>`;
+      brokenHtml += listBlock(`⬇ Failed downloads (${rdlFailed.length})`, '', items);
     }
     if (rdlMissing.length > 0) {
       const byReason = new Map<string, DownloadResultRow[]>();
@@ -529,7 +551,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       const items = [...byReason.entries()]
         .map(([reason, ds]) => `<li><div class="err">${esc(reason)}</div><div class="bk-combos">${ds.map(dlWhere).join(' · ')}</div></li>`)
         .join('');
-      brokenHtml += `<h3 class="bk-title warnt">⬇ Download button missing (${rdlMissing.length})</h3><ul class="broken-list warnt">${items}</ul>`;
+      brokenHtml += listBlock(`⬇ Download button missing (${rdlMissing.length})`, 'warnt', items);
     }
 
     // Feedback details: form problems (red), missing buttons grouped by reason
@@ -547,7 +569,7 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       const items = fbModalBroken
         .map((f) => `<li><div class="bk-head">${f.scope} Feedback form — ${where(f)}</div><div class="err">${esc(f.detail)}</div></li>`)
         .join('');
-      brokenHtml += `<h3 class="bk-title">💬 Feedback form problems (${fbModalBroken.length})</h3><ul class="broken-list">${items}</ul>`;
+      brokenHtml += listBlock(`💬 Feedback form problems (${fbModalBroken.length})`, '', items);
     }
     if (fbMissing.length > 0) {
       const byReason = new Map<string, FeedbackResultRow[]>();
@@ -558,11 +580,11 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       const items = [...byReason.entries()]
         .map(([reason, fs]) => `<li><div class="err">${esc(reason)}</div><div class="bk-combos">${fs.map(where).join(' · ')}</div></li>`)
         .join('');
-      brokenHtml += `<h3 class="bk-title warnt">💬 Feedback button missing (${fbMissing.length})</h3><ul class="broken-list warnt">${items}</ul>`;
+      brokenHtml += listBlock(`💬 Feedback button missing (${fbMissing.length})`, 'warnt', items);
     }
     if (fbNotes.length > 0) {
       const items = fbNotes.map((f) => `<li><div class="bk-head">${where(f)}</div><div class="err">${esc(f.detail)}</div></li>`).join('');
-      brokenHtml += `<h3 class="bk-title std">💬 Feedback notes (${fbNotes.length})</h3><ul class="broken-list std">${items}</ul>`;
+      brokenHtml += listBlock(`💬 Feedback notes (${fbNotes.length})`, 'std', items);
     }
 
     const fbVisual = rfb.filter((f) => f.check === 'button' && f.scope === 'visual' && f.state !== 'na');
@@ -614,9 +636,9 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
       : '';
 
     reportSections.push(`
-      <section class="report">
-        <h2>${esc(reportId)}</h2>
-        <p class="meta">${combos.length} combos · ${compKeys.length} components ·
+      <details class="report"${openReports ? ' open' : ''}>
+        <summary><h2>${esc(reportId)}</h2>
+        <span class="meta sum">${combos.length} combos · ${compKeys.length} components ·
           <span class="good">${rc.ok} ok</span> / <span class="bad">${rc.broken} broken</span> / <span class="muted">${rc.empty} empty</span>${
             rc.not_loaded ? ` / <span class="nl">${rc.not_loaded} not loaded</span>` : ''
           } cells ·
@@ -634,13 +656,13 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
               : ''
           }${fbMeta}${onGroups.size > 0 ? ` · <span class="chip warn">⚑ ${onGroups.size} on-screen</span>` : ''}${
             rst.length > 0 ? ` · <span class="chip std">☰ ${rst.length} standards</span>` : ''
-          }</p>
+          }</span></summary>
         ${timingMeta}
         ${filtersMeta}
         <div class="tablewrap"><table class="grid">${thead}${tbody}</table></div>
         ${keyHtml}
         ${brokenHtml}
-      </section>`);
+      </details>`);
   }
 
   const totals: Record<string, number> = { ok: 0, broken: 0, empty: 0, not_loaded: 0 };
@@ -769,13 +791,27 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
   .err-none{color:#9ca3af;font-style:italic}
   .bk-combos{font-size:12px;color:#555;margin-top:2px}
   .osw{display:inline-block;margin-left:2px;font-size:11px;font-weight:800;color:#b45309;vertical-align:1px;cursor:help}
+  /* Collapsible sections: ▸ closed, ▾ open */
+  details>summary{cursor:pointer;list-style:none}
+  details>summary::-webkit-details-marker{display:none}
+  details>summary::before{content:'▸';display:inline-block;width:16px;color:#374151;font-size:15px;line-height:1;transition:transform .12s}
+  details[open]>summary::before{transform:rotate(90deg)}
+  details.block,details.report{margin:22px 0 0;border-top:1px solid #e5e7eb;padding-top:8px}
+  details.block>summary h2,details.report>summary h2{display:inline;margin:0}
+  details.block>summary .sum{font-size:13px;margin-left:8px}
+  details.report>summary .sum{display:block;margin:4px 0 8px 14px}
+  details.sub>summary{margin:14px 0 6px}
+  .tools{margin:2px 0 6px}
+  .tools button{font:inherit;font-size:12px;padding:3px 10px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;margin-right:6px}
+  .tools button:hover{background:#f3f4f6}
   .defects{margin:18px 0 8px}
   .dwrap{overflow:auto;max-height:62vh;border:1px solid #e5e7eb;border-radius:8px;max-width:1500px}
   table.dtable{border-collapse:collapse;font-size:12px;width:100%}
   table.dtable th,table.dtable td{border-bottom:1px solid #eee;padding:6px 10px;text-align:left;vertical-align:top}
   table.dtable thead th{position:sticky;top:0;z-index:1;background:#f9fafb;font-weight:700;border-bottom:2px solid #d1d5db}
   td.did{font-family:ui-monospace,monospace;white-space:nowrap;color:#374151}
-  td.drep,td.dseen,td.dlinks{white-space:nowrap}
+  td.drep,td.dseen{white-space:nowrap}
+  td.dlinks{min-width:120px;max-width:200px}
   td.dseen{cursor:help}
   td.dcomp{min-width:170px;max-width:300px}
   td.dprob{font-weight:600;white-space:nowrap;cursor:help}
@@ -822,6 +858,9 @@ export default async function generateHtmlReport(playwrightConfig?: unknown): Pr
         : ''
     }
     · <span class="${totalBrokenCombos ? 'bad' : 'good'}">${totalBrokenCombos} of ${summary.length} combos broken</span></p>
+  <p class="tools"><button type="button" onclick="document.querySelectorAll('details').forEach(function (d) { d.open = true; })">Expand all</button><button type="button" onclick="document.querySelectorAll('details').forEach(function (d) { d.open = false; })">Collapse all</button>${
+    openReports ? '' : `<span class="meta">${byReport.size} reports — each starts folded to its summary; click one to open it.</span>`
+  }</p>
   ${platformHtml}
   ${defectsHtml}
   ${reportSections.join('\n')}

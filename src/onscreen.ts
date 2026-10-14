@@ -235,6 +235,26 @@ function matchBlocks(blocks: ScreenBlock[], section: any): number[] {
   });
 }
 
+/**
+ * Where each report component sits on screen: "s.c" (section, component index in
+ * the report) → its section and position among that section's component blocks.
+ * Used to photograph a single component.
+ */
+export function blockIndex(blocks: ScreenBlock[], rep: any): Map<string, { sIdx: number; n: number }> {
+  const out = new Map<string, { sIdx: number; n: number }>();
+  const bySection = new Map<number, ScreenBlock[]>();
+  for (const b of blocks) {
+    if (!bySection.has(b.sIdx)) bySection.set(b.sIdx, []);
+    bySection.get(b.sIdx)!.push(b);
+  }
+  for (const [sIdx, sBlocks] of bySection) {
+    matchBlocks(sBlocks, rep?.sections?.[sIdx] ?? {}).forEach((cIdx, n) => {
+      if (cIdx >= 0) out.set(`${sIdx}.${cIdx}`, { sIdx, n });
+    });
+  }
+  return out;
+}
+
 /** Apply the on-screen rules to what was read; one finding per component per rule. */
 export function onScreenFindings(blocks: ScreenBlock[], rep: any): OnScreenFinding[] {
   const sections: any[] = rep?.sections ?? [];

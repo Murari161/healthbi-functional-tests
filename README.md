@@ -269,7 +269,10 @@ In that folder:
   missing status. Under each grid, the **Combination key** lists every combo with
   one column per filter — **bold** = set by the test, grey = the app's own
   default, — = not applied — plus its result. The **defect list** sits at the top.
-  Open this first. Regenerate anytime with `npm run report:html`.
+  Every part folds (click its title; **Expand all** / **Collapse all** at the top):
+  problem lists start open, warnings and notes start folded, and a run of more than 3
+  reports starts with each report folded to its one-line summary. Open this first.
+  Regenerate anytime with `npm run report:html`.
 - **`defects.csv`** — the defect list (see [Defect list](#defect-list)).
 - `onscreen.csv` (+ `.jsonl`) — one row per on-screen flag (report, combo, component, flag, detail).
 - `filters.csv` (+ `.jsonl`) — one row per filter: did its dropdown list load, how many values, which ones were used.
@@ -285,6 +288,11 @@ In that folder:
   (the window is stretched to the report's height for the picture, capped at 16,000 px).
 - `screenshots/components/<report>__<combo>__<component>.png` — a screenshot of
   each **broken component** card.
+- `screenshots/components/<report>__<combo>__c<section>_<component>.png` — a picture of
+  just the component, for each one with a problem: no download or Feedback button, a
+  download or Feedback form that failed, no data (default view), or an on-screen flag.
+  The defect list links each row to its component's picture (several for a grouped row),
+  falling back to the whole-report picture.
 
 Component states come from the report JSON the browser fetches (same payload that
 renders the page): a component with `error` set → broken, with data → ok, else empty.
