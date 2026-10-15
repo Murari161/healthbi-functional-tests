@@ -10,7 +10,7 @@ It runs **entirely against the deployed site**. It never touches the database or
 any backend internals — it only sees what a logged-in user's browser renders.
 
 ```
-functional-tests/            ← this folder (its own git repo, beside dwh_visualization)
+functional-tests/            ← this folder (its own git repo, separate from the dwh_visualization app)
 ├─ scripts/prepare.ts        login once + cache the report list
 ├─ src/
 │  ├─ config.ts              env/config + deep-link URL builder
@@ -26,7 +26,7 @@ functional-tests/            ← this folder (its own git repo, beside dwh_visua
 ## Setup
 
 ```bash
-cd "D:/Data Warehouse Work/dwh_visualization/functional-tests"
+cd "D:/Data Warehouse Work/functional-tests"
 npm install
 npm run install-browser        # downloads Chromium
 cp .env.example .env           # then edit .env
@@ -46,7 +46,7 @@ Fill in `.env`:
 ## Run — exact steps
 
 All commands are run from this folder:
-`D:/Data Warehouse Work/dwh_visualization/functional-tests`
+`D:/Data Warehouse Work/functional-tests`
 
 **Step 1 — one-time setup** (only the first time):
 ```bash
